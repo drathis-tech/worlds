@@ -1,115 +1,120 @@
 # Orbit Oafs – Worlds
 
-Planet art for **Orbit Oafs**, a game about exploring space and finding habitable planets.
+Explorable planets for **Orbit Oafs**, a game about exploring space and finding habitable planets.
 
-The planets are full size, so a ship can land on them and players can walk
-around. They're made by a Blender script: each seed number gives a different
-planet. The look is stylized and chunky, with faceted mountains, bright grass,
-turquoise water, low-poly forests and puffy clouds.
+Each planet is full size: about **20 minutes to walk around** at 5 m/s. Ships
+can land, and players can walk, run and climb. The ground is built inside
+Godot while the game runs, with lots of detail near the player and less far
+away. That keeps a 1 km planet smooth and detailed without huge files. Change
+one number (the seed) and you get a different planet.
 
-| From orbit | After landing |
+| On the ground | Flying low |
 | --- | --- |
-| ![Planet from orbit](previews/earthlike_seed7_orbit.jpg) | ![Planet surface](previews/earthlike_seed7_surface.jpg) |
+| ![Standing on a landing site](previews/ground.jpg) | ![Flying over forests](previews/low_flight.jpg) |
+| **Mountains** | **From orbit** |
+| ![Mountains by a lake](previews/mountain.jpg) | ![The whole planet](previews/orbit.jpg) |
 
-## How big is a planet?
-
-The default radius is **500 m**:
-
-- Walking all the way around takes about 10 minutes.
-- Mountains are up to about 65 m tall, and oceans about 25 m deep.
-- Trees are 6–11 m tall, about 6,000 of them per planet.
-- The ground has a point every 3.5 m, so small bumps and rocks show up when you walk.
-
-You can change the radius in the script. Above about 600 m the files get very
-big, and it's better to generate the ground inside Godot while the game runs
-(see "Next steps").
+These pictures come from Godot's Compatibility renderer running without a
+graphics card. Forward+ on a real PC will look a bit nicer.
 
 ## What's here
 
 | Path | What it is |
 | --- | --- |
-| `blender/planet_generator.py` | Builds a planet in Blender and exports it for Godot |
-| `godot/orbit_planet.gd` | Godot script: planet gravity, trees, landing sites |
-| `godot/planet_walker.gd` | Godot test character for walking around a planet |
-| `exports/` | A ready-made example planet (seed 7) |
-| `previews/` | Preview pictures |
+| `godot/` | A Godot 4.7 test project. Open it and press Play to walk around a planet. |
+| `godot/planets/` | **The part your game needs.** Copy this folder into your project. |
+| `blender/props_generator.py` | Builds the trees, bushes, rocks and grass in Blender |
+| `previews/` | Screenshots |
 
-Each planet export has three files:
+## Try it
 
-| File | What it is |
-| --- | --- |
-| `earthlike_seed7.glb` | Ground (96 pieces, each with collision), ocean, clouds, landing sites |
-| `earthlike_seed7_trees.json` | Where every tree goes |
-| `trees_earthlike.glb` | The tree models (shared by every Earth-like planet) |
+1. Open `godot/project.godot` in Godot 4.7.
+2. Press **Play**. You start on a landing site.
+3. Controls: **WASD** to move, mouse to look, **Shift** to run, **Space** to jump, **Esc** frees the mouse.
 
-## Making a planet in Blender
+## Put a planet in your game
 
-You need Blender 4.2 or newer.
+1. Copy the `godot/planets` folder into the root of your Godot project, so it ends up at `res://planets`.
+2. Add a **Node3D** to your scene and attach `planets/planet.gd`. It becomes a `Planet`.
+3. In the Inspector:
+   - **Planet Seed**: any number. Each one gives a different planet.
+   - **Radius**: 1000 m by default, which is about 20 minutes to walk around.
+   - **Focus**: your player or ship. The ground near it gets the most detail
+     and the collision. If you leave it empty, the active camera is used.
+   - **Start At Landing Site** (optional): something to place on a landing site at the start.
+4. Add a **DirectionalLight3D** as the sun.
 
-1. Open Blender and click the **Scripting** tab at the top.
-2. In the text editor, click **Open** and choose `blender/planet_generator.py`.
-3. At the top of the script, change `SETTINGS` if you like:
-   - `seed`: any whole number. Each one gives a different planet.
-   - `radius`: planet size in metres.
-   - `ground_spacing`: metres between ground points. Smaller means more detail but bigger files.
-4. Press **Run Script** (the ▶ button). It takes a minute or two, and Blender freezes until it's done.
+The planet adds its own gravity, ocean, clouds, sky, haze and atmosphere glow.
 
-The files are saved next to your `.blend` file in an `exports` folder. If the
-`.blend` isn't saved yet, they go to `orbit_oafs_exports` in your home folder.
+### Things your code can use
+
+```gdscript
+planet.place_at_landing_site(ship)        # put the ship on a flat landing spot
+planet.landing_sites                      # Marker3D nodes, +Y points up
+planet.up_at(ship.global_position)        # "up" anywhere on the planet
+planet.altitude_of(ship.global_position)  # metres above sea level
+planet.ground_height_at(position)         # ground height under a point
+planet.loaded                             # signal: ground around the focus is ready
+```
+
+**Gravity** pulls toward the planet's centre through an `Area3D`. A
+`RigidBody3D` follows it automatically. In a `CharacterBody3D`, use
+`get_gravity()` and set `up_direction = -get_gravity().normalized()`.
+`planets/planet_walker.gd` is a complete working example.
+
+**Collision** only exists near the Focus. Anything else that needs to touch
+the ground, like a second ship, should stay near the Focus. Otherwise you can
+switch the Focus to it.
+
+## Changing how planets look
+
+All the planet settings live in `planets/presets/earthlike.tres`. Open it in
+Godot to change the ocean amount, mountain height and how many there are,
+lakes, the snow line, every colour, tree density and the number of clouds.
+To make a new planet type, duplicate that file, change it, and set it as the
+planet's **Preset**.
+
+Detail settings on the Planet node:
+
+- **Ground Detail**: how fine the ground is near the focus. 6 gives about 0.8 m.
+- **Detail Distance**: how far out the detailed ground reaches.
+- **Prop Draw Distance**: how far away trees and rocks are drawn.
+
+## Trees, rocks and grass (Blender)
+
+The props are made by `blender/props_generator.py` and saved to
+`godot/planets/models/props.glb`. To change them:
+
+1. Open Blender (4.2 or newer), go to the **Scripting** tab, open the script and press **Run Script**.
+2. Edit the models by hand if you like. Keep their names (`Pine`,
+   `PineTall`, `PineSnowy`, `RoundTree`, `Bush`, `Rock`, `RockFlat`,
+   `Boulder`, `Grass`), because Godot finds them by name.
+3. Export them as `props.glb` into `godot/planets/models/`.
 
 From the command line:
 
 ```
-blender -b -P blender/planet_generator.py -- --seed 7 --render
+blender -b -P blender/props_generator.py -- --out godot/planets/models/props.glb
 ```
 
-Options: `--seed N`, `--type NAME`, `--radius METRES`, `--spacing METRES`,
-`--chunks N`, `--out FOLDER`, `--no-export`, `--render`, `--save-blend`.
+## Checking a planet without playing
 
-## Using a planet in Godot
-
-1. Copy everything from `exports/` and both scripts from `godot/` into your Godot project.
-2. Make a new 3D scene with a **Node3D** root, and attach `orbit_planet.gd` to it.
-3. Drag `earthlike_seed7.glb` in as a child of that root.
-4. Select the root. In the Inspector, set **Trees File** to `earthlike_seed7_trees.json`
-   and **Tree Models** to `trees_earthlike.glb`.
-5. Add a **DirectionalLight3D** (the sun) and a **WorldEnvironment** for the sky.
-
-The ground gets collision automatically when Godot imports the `.glb`. Every
-ground piece is named `...-col`, which tells Godot to add it.
-
-### Walking around to test the size
-
-1. Add a **CharacterBody3D** to the scene and attach `planet_walker.gd`.
-2. Give it two children: a **CollisionShape3D** with a capsule shape, and a
-   **Camera3D** raised about 0.7 m.
-3. On the planet root, set **Start At Landing Site** to the character.
-4. Press Play. Use the arrow keys to move, the mouse to look, Space to jump and Esc to free the mouse.
-
-### For your ship and player code
-
-- Gravity pulls toward the planet's centre through an `Area3D`. Rigid bodies
-  follow it automatically. In a `CharacterBody3D`, call `get_gravity()` and set
-  `up_direction = -get_gravity().normalized()`, like `planet_walker.gd` does.
-- `planet.get_landing_sites()` returns flat spots that are good for landing.
-  The ground around each one is flattened. Each marker's +Y axis points up.
-- `planet.place_at_landing_site(ship)` puts something on a landing site.
-- `planet.up_at(position)` gives the "up" direction anywhere on the planet.
+```
+godot --path godot -- --test-walk   # checks landing, walking and running
+godot --path godot -- --shots       # saves screenshots to Godot's user:// folder
+```
 
 ## Planet types
 
 | Type | Status |
 | --- | --- |
 | Earth-like (habitable) | ✅ Done |
-| Others (desert, ice, lava, gas giant, …) | Still to be decided |
+| Others (desert, ice, lava, gas giant, …) | Still to be decided. Each will be a new preset. |
 
-To add a new type, copy the `"earthlike"` block in `PRESETS` inside the script
-and change its numbers and colours.
+## Good to know
 
-## Next steps
-
-- A Godot shader for the blue atmosphere glow. In the previews it only exists inside Blender.
-- Rocks, boulders and other props on the ground.
-- For planets much bigger than 600 m: generate the ground inside Godot while
-  the game runs, with more detail near the player. The same shapes and colours
-  from this script can be reused.
+- Building the ground around the player at the start takes about 5 seconds on
+  a 4-core computer. Show a loading screen until the `loaded` signal fires.
+- Trees and big rocks have collision. Grass and bushes don't.
+- The water has no collision. Players sink into it, so swimming still needs to be added.
+- The ground is the same every time for the same seed. Nothing is saved to disk.

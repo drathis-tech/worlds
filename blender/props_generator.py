@@ -1,0 +1,339 @@
+"""
+Orbit Oafs - planet props generator for Blender (4.2 or newer).
+
+Builds the trees, bushes, rocks and grass that Godot scatters over the
+planets, and exports them as one .glb file:
+    godot/planets/models/props.glb
+
+Every model is real size (metres), stands on the origin and points up.
+Godot finds each model by its name, so keep the names if you edit them.
+
+HOW TO USE IN BLENDER
+  1. Open Blender and go to the "Scripting" tab.
+  2. Click "Open" and pick this file, then press Run Script.
+  3. The models appear in a collection called "OrbitOafs_Props", side by side.
+  You can tweak them by hand and export again with File > Export > glTF
+  (choose "Selected Objects" and the .glb format).
+
+HOW TO USE FROM THE COMMAND LINE
+  blender -b -P blender/props_generator.py -- --out godot/planets/models/props.glb
+"""
+
+import math
+import os
+import random
+import sys
+
+import bmesh
+import bpy
+from mathutils import Vector, noise
+
+COLLECTION = "OrbitOafs_Props"
+
+
+def hex_color(h):
+    h = h.lstrip("#")
+    out = []
+    for i in (0, 2, 4):
+        c = int(h[i:i + 2], 16) / 255.0
+        out.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return (out[0], out[1], out[2], 1.0)
+
+
+def lerp(a, b, t):
+    t = max(0.0, min(1.0, t))
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(4))
+
+
+C = {k: hex_color(v) for k, v in {
+    "trunk": "#6e4a2e",
+    "trunk_dark": "#4f3420",
+    "pine_dark": "#2a7440",
+    "pine": "#3a9850",
+    "pine_tip": "#70c86c",
+    "leaf_dark": "#3f9a3a",
+    "leaf": "#6cc24a",
+    "leaf_tip": "#a6e070",
+    "snow": "#f4f8fc",
+    "snow_shadow": "#cfdeec",
+    "rock_dark": "#7f7c77",
+    "rock": "#aeaaa2",
+    "rock_light": "#d3cfc7",
+    "grass_dark": "#3f9a34",
+    "grass_tip": "#a8de62",
+}.items()}
+
+
+class Builder:
+    """Collects geometry with per-corner colours into one mesh."""
+
+    def __init__(self):
+        self.bm = bmesh.new()
+        self.col = self.bm.loops.layers.float_color.new("Col")
+
+    def add_bmesh(self, src, color_fn, smooth=True):
+        """Copy another bmesh in. color_fn(position, normal) -> RGBA."""
+        src.normal_update()
+        vmap = {v: self.bm.verts.new(v.co) for v in src.verts}
+        for f in src.faces:
+            nf = self.bm.faces.new([vmap[v] for v in f.verts])
+            nf.smooth = smooth
+            for loop, src_loop in zip(nf.loops, f.loops):
+                loop[self.col] = color_fn(src_loop.vert.co, src_loop.vert.normal)
+
+    def finish(self, name):
+        me = bpy.data.meshes.new(name)
+        self.bm.normal_update()
+        self.bm.to_mesh(me)
+        self.bm.free()
+        return me
+
+
+def ring_cone(segments, radius, z0, z1, droop=0.0, jag=0.0, rng=None):
+    """A cone with a wavy, drooping rim: one tier of a pine tree."""
+    bm = bmesh.new()
+    rim = []
+    for i in range(segments):
+        a = i / segments * math.tau
+        r = radius * (1.0 + (jag if i % 2 else -jag) * (0.6 + 0.4 * (rng.random() if rng else 0.5)))
+        rim.append(bm.verts.new((math.cos(a) * r, math.sin(a) * r, z0 - droop * (r / radius))))
+    # a middle ring gives the tier a soft, rounded shape
+    mid = [bm.verts.new((v.co.x * 0.55, v.co.y * 0.55, z0 + (z1 - z0) * 0.45)) for v in rim]
+    top = bm.verts.new((0, 0, z1))
+    under = bm.verts.new((0, 0, z0 + (z1 - z0) * 0.12))
+    for i in range(segments):
+        j = (i + 1) % segments
+        bm.faces.new((rim[i], rim[j], mid[j], mid[i]))
+        bm.faces.new((mid[i], mid[j], top))
+        bm.faces.new((rim[j], rim[i], under))
+    return bm
+
+
+def cylinder(segments, r0, r1, z0, z1):
+    bm = bmesh.new()
+    lo, hi = [], []
+    for i in range(segments):
+        a = i / segments * math.tau
+        lo.append(bm.verts.new((math.cos(a) * r0, math.sin(a) * r0, z0)))
+        hi.append(bm.verts.new((math.cos(a) * r1, math.sin(a) * r1, z1)))
+    for i in range(segments):
+        j = (i + 1) % segments
+        bm.faces.new((lo[i], lo[j], hi[j], hi[i]))
+    return bm
+
+
+def blob(subdiv, radius, center, rng, wobble=0.18, squash=1.0):
+    """A lumpy ball, used for leaves, bushes and rocks."""
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=subdiv, radius=1.0)
+    off = Vector((rng.uniform(-50, 50), rng.uniform(-50, 50), rng.uniform(-50, 50)))
+    for v in bm.verts:
+        d = v.co.normalized()
+        n = noise.noise(d * 1.8 + off, noise_basis="PERLIN_NEW")
+        r = radius * (1.0 + n * wobble)
+        v.co = Vector((d.x * r, d.y * r, d.z * r * squash)) + Vector(center)
+    return bm
+
+
+def bark(p, n):
+    return lerp(C["trunk_dark"], C["trunk"], 0.5 + p.z * 0.1)
+
+
+def make_pine(name, height, tiers, width, snowy, seed):
+    rng = random.Random(seed)
+    b = Builder()
+    b.add_bmesh(cylinder(7, width * 0.09, width * 0.05, -0.4, height * 0.5), bark)
+    base = height * 0.18
+    for t in range(tiers):
+        f = t / max(1, tiers - 1)                # 0 bottom, 1 top
+        z0 = base + (height - base) * f * 0.78
+        r = width * (1.0 - f * 0.78)
+        z1 = z0 + (height - base) * 0.34
+        if t == tiers - 1:
+            z1 = height
+        tier = ring_cone(12, r, z0, z1, droop=r * 0.22, jag=0.12, rng=rng)
+
+        def color(p, n, z0=z0, z1=z1, r=r):
+            k = (p.z - z0) / max(0.01, z1 - z0)
+            outer = min(1.0, Vector((p.x, p.y)).length / max(0.01, r))
+            c = lerp(C["pine_dark"], C["pine"], k * 0.8 + 0.2)
+            c = lerp(c, C["pine_tip"], outer * 0.45 * (1.0 - k))
+            if snowy and n.z > 0.25:
+                c = lerp(c, lerp(C["snow_shadow"], C["snow"], n.z), min(1.0, (n.z - 0.25) * 3.0))
+            return c
+
+        b.add_bmesh(tier, color)
+    return b.finish(name)
+
+
+def make_round_tree(name, height, seed):
+    rng = random.Random(seed)
+    b = Builder()
+    b.add_bmesh(cylinder(7, 0.28, 0.16, -0.4, height * 0.6), bark)
+    crown_z = height * 0.62
+    puffs = [((0, 0, crown_z), height * 0.3)]
+    for _ in range(5):
+        a = rng.uniform(0, math.tau)
+        rr = height * rng.uniform(0.12, 0.22)
+        puffs.append(((math.cos(a) * rr, math.sin(a) * rr, crown_z + rng.uniform(-0.12, 0.18) * height),
+                      height * rng.uniform(0.17, 0.24)))
+
+    def color(p, n):
+        k = (p.z - height * 0.4) / (height * 0.6)
+        c = lerp(C["leaf_dark"], C["leaf"], k)
+        return lerp(c, C["leaf_tip"], max(0.0, n.z) * 0.35)
+
+    for center, r in puffs:
+        b.add_bmesh(blob(2, r, center, rng, 0.15), color)
+    return b.finish(name)
+
+
+def make_bush(name, size, seed):
+    rng = random.Random(seed)
+    b = Builder()
+
+    def color(p, n):
+        return lerp(lerp(C["leaf_dark"], C["leaf"], p.z / size), C["leaf_tip"], max(0.0, n.z) * 0.3)
+
+    for _ in range(4):
+        a = rng.uniform(0, math.tau)
+        rr = size * rng.uniform(0.1, 0.35)
+        r = size * rng.uniform(0.3, 0.45)
+        b.add_bmesh(blob(2, r, (math.cos(a) * rr, math.sin(a) * rr, r * 0.6), rng, 0.2, 0.8), color)
+    return b.finish(name)
+
+
+def make_rock(name, size, squash, seed, sharp=True):
+    rng = random.Random(seed)
+    b = Builder()
+    bm = blob(3, size * 0.5, (0, 0, size * 0.18 * squash), rng, 0.32, squash)
+    # flatten the bottom so it sits on the ground
+    for v in bm.verts:
+        if v.co.z < -size * 0.05:
+            v.co.z = -size * 0.05 - (v.co.z + size * 0.05) * 0.2
+
+    def color(p, n):
+        c = lerp(C["rock_dark"], C["rock"], 0.5 + n.z * 0.5)
+        return lerp(c, C["rock_light"], max(0.0, n.z - 0.5))
+
+    b.add_bmesh(bm, color, smooth=not sharp)
+    return b.finish(name)
+
+
+def make_grass(name, seed):
+    """A tuft of grass blades (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(9):
+        bm = bmesh.new()
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.18), math.sin(a) * rng.uniform(0, 0.18)
+        h = rng.uniform(0.35, 0.65)
+        w = rng.uniform(0.05, 0.08)
+        side = Vector((math.cos(a + 1.57), math.sin(a + 1.57), 0)) * w
+        lean = Vector((math.cos(a), math.sin(a), 0)) * rng.uniform(0.05, 0.2)
+        p0 = bm.verts.new(Vector((x, y, -0.05)) - side)
+        p1 = bm.verts.new(Vector((x, y, -0.05)) + side)
+        p2 = bm.verts.new(Vector((x, y, h * 0.55)) + side * 0.6 + lean * 0.4)
+        p3 = bm.verts.new(Vector((x, y, h * 0.55)) - side * 0.6 + lean * 0.4)
+        tip = bm.verts.new(Vector((x, y, h)) + lean)
+        bm.faces.new((p0, p1, p2, p3))
+        bm.faces.new((p3, p2, tip))
+        b.add_bmesh(bm, lambda p, n: lerp(C["grass_dark"], C["grass_tip"], p.z / 0.6))
+    return b.finish(name)
+
+
+# ---------------------------------------------------------------------------
+# Materials and scene
+# ---------------------------------------------------------------------------
+def vertex_color_material(name, double_sided=False):
+    mat = bpy.data.materials.new(name)
+    if bpy.app.version < (5, 0, 0):
+        mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+    attr = nt.nodes.new("ShaderNodeVertexColor")
+    attr.layer_name = "Col"
+    nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = 0.9
+    mat.use_backface_culling = not double_sided
+    return mat
+
+
+def fresh_collection():
+    old = bpy.data.collections.get(COLLECTION)
+    if old:
+        for obj in list(old.all_objects):
+            data = obj.data
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if isinstance(data, bpy.types.Mesh) and data.users == 0:
+                bpy.data.meshes.remove(data)
+        bpy.data.collections.remove(old)
+    coll = bpy.data.collections.new(COLLECTION)
+    bpy.context.scene.collection.children.link(coll)
+    return coll
+
+
+def build_all():
+    coll = fresh_collection()
+    solid = vertex_color_material("OO_Props")
+    two_sided = vertex_color_material("OO_Props_TwoSided", double_sided=True)
+    models = [
+        (make_pine("Pine", 8.0, 5, 2.4, False, 1), solid),
+        (make_pine("PineTall", 11.5, 7, 2.6, False, 2), solid),
+        (make_pine("PineSnowy", 8.5, 5, 2.5, True, 3), solid),
+        (make_round_tree("RoundTree", 6.5, 4), solid),
+        (make_bush("Bush", 1.6, 5), solid),
+        (make_rock("Rock", 1.4, 0.8, 6), solid),
+        (make_rock("RockFlat", 2.2, 0.45, 7), solid),
+        (make_rock("Boulder", 4.5, 0.75, 8), solid),
+        (make_grass("Grass", 9), two_sided),
+    ]
+    objects = []
+    for i, (me, mat) in enumerate(models):
+        me.materials.append(mat)
+        me.color_attributes.active_color = me.color_attributes["Col"]
+        obj = bpy.data.objects.new(me.name, me)
+        obj.location = (i * 6.0, 0, 0)
+        coll.objects.link(obj)
+        if me.name.startswith("Rock") or me.name == "Boulder":
+            if hasattr(me, "set_sharp_from_angle"):
+                for p in me.polygons:
+                    p.use_smooth = True
+                me.set_sharp_from_angle(angle=math.radians(40))
+        objects.append(obj)
+    return objects
+
+
+def export(objects, path):
+    # Godot finds models by name, so export them all standing on the origin.
+    saved = [o.location.copy() for o in objects]
+    for o in objects:
+        o.location = (0, 0, 0)
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objects:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objects[0]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True)
+    for o, loc in zip(objects, saved):
+        o.location = loc
+    print("Exported", path)
+
+
+def main():
+    out = None
+    if "--" in sys.argv:
+        args = sys.argv[sys.argv.index("--") + 1:]
+        if "--out" in args:
+            out = args[args.index("--out") + 1]
+    if out is None:
+        here = os.path.dirname(bpy.data.filepath) if bpy.data.filepath else os.path.expanduser("~")
+        out = os.path.join(here, "props.glb")
+    if bpy.context.object and bpy.context.object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    export(build_all(), out)
+
+
+if __name__ == "__main__":
+    main()

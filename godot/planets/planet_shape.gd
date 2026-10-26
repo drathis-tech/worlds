@@ -1,0 +1,227 @@
+class_name PlanetShape
+extends RefCounted
+## Works out how high the ground is in any direction from the planet centre.
+## Everything here only reads data, so worker threads can share one shape.
+
+var radius: float
+var preset: PlanetPreset
+
+var _sea := 0.0          # continent value at sea level
+var _c_min := -1.0
+var _c_max := 1.0
+var _sites: Array = []   # flattened landing areas: [dir, height, cos_outer, cos_inner]
+
+var _continent: FastNoiseLite
+var _warp: Array[FastNoiseLite] = []
+var _region: FastNoiseLite
+var _mountains: FastNoiseLite
+var _ridges: FastNoiseLite
+var _crags: FastNoiseLite
+var _hills: FastNoiseLite
+var _lakes: FastNoiseLite
+var _bumps: FastNoiseLite
+var _patch: FastNoiseLite
+
+# The six sides of the cube that gets blown up into a ball:
+# outward axis, u axis, v axis (u x v = outward).
+const FACES := [
+	[Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)],
+	[Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 1, 0)],
+	[Vector3(0, 1, 0), Vector3(0, 0, 1), Vector3(1, 0, 0)],
+	[Vector3(0, -1, 0), Vector3(1, 0, 0), Vector3(0, 0, 1)],
+	[Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)],
+	[Vector3(0, 0, -1), Vector3(0, 1, 0), Vector3(1, 0, 0)],
+]
+
+
+func _init(p_preset: PlanetPreset, p_radius: float, p_seed: int) -> void:
+	preset = p_preset
+	radius = p_radius
+	var s := p_seed * 7919
+	_continent = _make(s + 1, preset.continent_scale, 4, FastNoiseLite.FRACTAL_FBM)
+	# Bends the continents into more natural shapes. (Godot's built-in
+	# domain warp is jumpy at this scale, so it's done by hand.)
+	for k in 3:
+		_warp.append(_make(s + 20 + k, preset.continent_scale, 3, FastNoiseLite.FRACTAL_FBM))
+	_region = _make(s + 2, 1.6, 3, FastNoiseLite.FRACTAL_FBM)
+	_mountains = _make(s + 3, preset.mountain_scale, 4, FastNoiseLite.FRACTAL_FBM)
+	_ridges = _make(s + 9, preset.mountain_scale * 0.8, 2, FastNoiseLite.FRACTAL_FBM)
+	_crags = _make(s + 4, radius / 18.0, 3, FastNoiseLite.FRACTAL_FBM)
+	_hills = _make(s + 5, 7.0, 3, FastNoiseLite.FRACTAL_FBM)
+	_lakes = _make(s + 6, 3.5, 3, FastNoiseLite.FRACTAL_FBM)
+	_bumps = _make(s + 7, radius / preset.bump_size_m, 3, FastNoiseLite.FRACTAL_FBM)
+	_patch = _make(s + 8, 2.5, 4, FastNoiseLite.FRACTAL_FBM)
+	_calibrate()
+
+
+func _make(seed_value: int, frequency: float, octaves: int, fractal: int) -> FastNoiseLite:
+	var n := FastNoiseLite.new()
+	n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	n.seed = seed_value
+	n.frequency = frequency
+	n.fractal_type = fractal
+	n.fractal_octaves = octaves
+	return n
+
+
+## Picks the sea level so that `ocean_amount` of the surface is water.
+func _calibrate() -> void:
+	var values := PackedFloat32Array()
+	var count := 6000
+	for i in count:
+		values.append(continent(fibonacci_dir(i, count)))
+	values.sort()
+	_c_min = values[0]
+	_c_max = values[count - 1]
+	_sea = values[int(preset.ocean_amount * (count - 1))]
+
+
+## Evenly spread directions over a sphere.
+static func fibonacci_dir(i: int, count: int) -> Vector3:
+	var y := 1.0 - (i + 0.5) / count * 2.0
+	var r := sqrt(1.0 - y * y)
+	var a := i * 2.399963229728653
+	return Vector3(cos(a) * r, y, sin(a) * r)
+
+
+## Point (a, b) in -1..1 on a cube side -> direction from the centre.
+## Points past the edge of the side wrap round onto the next side.
+static func cube_dir(face: int, a: float, b: float) -> Vector3:
+	var f: Array = FACES[face]
+	var c: Vector3 = f[0] + f[1] * a + f[2] * b
+	var m := maxf(absf(c.x), maxf(absf(c.y), absf(c.z)))
+	if m > 1.0:
+		c /= m
+	var x2 := c.x * c.x
+	var y2 := c.y * c.y
+	var z2 := c.z * c.z
+	return Vector3(
+		c.x * sqrt(maxf(0.0, 1.0 - y2 * 0.5 - z2 * 0.5 + y2 * z2 / 3.0)),
+		c.y * sqrt(maxf(0.0, 1.0 - z2 * 0.5 - x2 * 0.5 + z2 * x2 / 3.0)),
+		c.z * sqrt(maxf(0.0, 1.0 - x2 * 0.5 - y2 * 0.5 + x2 * y2 / 3.0))).normalized()
+
+
+func set_landing_sites(sites: Array) -> void:
+	_sites = sites
+
+
+## True if direction `d` is inside a flattened landing area.
+func in_landing_site(d: Vector3) -> bool:
+	for site in _sites:
+		if d.dot(site[0]) > site[2]:
+			return true
+	return false
+
+
+## Raw continent value: above the sea level value means land.
+func continent(d: Vector3) -> float:
+	var w := Vector3(_warp[0].get_noise_3dv(d), _warp[1].get_noise_3dv(d), _warp[2].get_noise_3dv(d))
+	return _continent.get_noise_3dv(d + w * 0.4)
+
+
+## 0..1: how much a spot is inside a mountain range.
+func mountain_mask(d: Vector3, land_t: float) -> float:
+	var amount := preset.mountain_amount
+	var region := _region.get_noise_3dv(d) * 0.5 + 0.5
+	# Mountains rise gently from the coast instead of starting as a wall.
+	return smoothstep(0.04, 0.45, land_t) * smoothstep(1.0 - amount, 1.12 - amount * 0.7, region)
+
+
+## 0..1: forest density at a spot.
+func forest(d: Vector3) -> float:
+	return smoothstep(-0.05, 0.25, _patch.get_noise_3dv(d))
+
+
+## Height in metres above sea level, without landing-site flattening.
+## Returns Vector2(height, mountain mask).
+func raw_height(d: Vector3) -> Vector2:
+	var c := continent(d)
+	var bumps := _bumps.get_noise_3dv(d) * preset.bump_height_m
+	if c < _sea:
+		var depth := (_sea - c) / maxf(1e-6, _sea - _c_min)
+		return Vector2(-preset.ocean_depth * radius * sqrt(depth) + bumps * 0.5, 0.0)
+
+	# Heights are continuous at the coast, so shorelines stay smooth.
+	var land_t := (c - _sea) / maxf(1e-6, _c_max - _sea)
+	var h := preset.land_height * radius * (1.0 - pow(1.0 - minf(land_t, 1.0), 2.0))
+	h += preset.hill_height * radius * (_hills.get_noise_3dv(d) * 0.5 + 0.5) * smoothstep(0.0, 0.2, land_t)
+
+	var mask := mountain_mask(d, land_t)
+	if mask > 0.0:
+		# Broad mountain bodies plus a few sharp ridge lines along their tops.
+		var body := _mountains.get_noise_3dv(d) * 0.5 + 0.5
+		var ridge := 1.0 - absf(_ridges.get_noise_3dv(d))
+		var m := clampf(body * 0.9 + ridge * ridge * 0.35 - 0.3, 0.0, 1.0) / 0.75
+		var mh := preset.mountain_height * radius * pow(minf(m, 1.0), 1.3) * mask
+		mh += _crags.get_noise_3dv(d) * 4.5 * mask * smoothstep(5.0, 30.0, mh)
+		# Stylized rock ledges: flat steps with steep faces between them.
+		var step := preset.ledge_height_m
+		var t := mh / step
+		var ledged := (floorf(t) + smoothstep(0.55, 1.0, t - floorf(t))) * step
+		h += lerpf(mh, ledged, preset.ledge_strength * smoothstep(4.0, 20.0, mh))
+
+	if preset.lakes > 0.0 and mask < 0.4:
+		var start := 0.42 - 0.22 * preset.lakes
+		var lake_t := smoothstep(start, start + 0.08, _lakes.get_noise_3dv(d))
+		lake_t *= smoothstep(0.03, 0.12, land_t) * (1.0 - mask * 2.5)
+		h = lerpf(h, -3.0, lake_t)
+
+	h += bumps * smoothstep(0.0, 0.05, land_t)
+	return Vector2(h, mask)
+
+
+## Height in metres above sea level at direction `d` (a unit vector).
+func height(d: Vector3) -> float:
+	var h := raw_height(d).x
+	for site in _sites:
+		var c: float = d.dot(site[0])
+		if c > site[2]:
+			h = lerpf(h, site[1], smoothstep(site[2], site[3], c))
+	return h
+
+
+## Finds flat, grassy, dry spots far apart from each other.
+## Returns an array of [direction, height].
+func find_landing_sites(count: int, site_radius_m: float, seed_value: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var candidates := []
+	for _i in 5000:
+		var d := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
+		var hm := raw_height(d)
+		if hm.x < 3.0 or hm.x > preset.snow_line * radius * 0.4 or hm.y > 0.15:
+			continue
+		var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
+		var t2 := d.cross(t1)
+		var worst := 0.0
+		for k in 8:
+			var ang := k * TAU / 8.0
+			var dd := (d + (t1 * cos(ang) + t2 * sin(ang)) * (site_radius_m * 1.2 / radius)).normalized()
+			var hh := raw_height(dd).x
+			worst = maxf(worst, absf(hh - hm.x))
+			if hh < 1.5:
+				worst = INF
+		if worst < 7.0:
+			candidates.append([worst, d, hm.x])
+	candidates.sort_custom(func(x, y): return x[0] < y[0])
+
+	var sites := []
+	var min_gap := cos(minf(1.0, 2.2 / sqrt(maxf(1.0, count))))
+	for cand in candidates:
+		var ok := true
+		for s in sites:
+			if cand[1].dot(s[0]) > min_gap:
+				ok = false
+				break
+		if ok:
+			sites.append([cand[1], cand[2]])
+		if sites.size() >= count:
+			break
+
+	var outer := cos(site_radius_m * 1.6 / radius)
+	var inner := cos(site_radius_m / radius)
+	var flat := []
+	for s in sites:
+		flat.append([s[0], s[1], outer, inner])
+	set_landing_sites(flat)
+	return sites

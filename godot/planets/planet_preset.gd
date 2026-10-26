@@ -1,0 +1,64 @@
+class_name PlanetPreset
+extends Resource
+## The recipe for one kind of planet: its shape and colours.
+## Make new planet types by duplicating presets/earthlike.tres and changing values.
+
+@export_group("Shape")
+## Share of the surface covered by ocean (0-1).
+@export_range(0.0, 1.0) var ocean_amount: float = 0.48
+## Bigger = more, smaller continents.
+@export var continent_scale: float = 1.5
+## Lowland height as a fraction of the radius.
+@export var land_height: float = 0.02
+## Ocean depth as a fraction of the radius.
+@export var ocean_depth: float = 0.04
+## Tallest mountains as a fraction of the radius (0.15 x 1000 m = 150 m).
+@export var mountain_height: float = 0.15
+## Bigger = more, narrower mountain ridges.
+@export var mountain_scale: float = 3.0
+## 0 = no mountains, 1 = mountains everywhere.
+@export_range(0.0, 1.0) var mountain_amount: float = 0.72
+## Rolling hills, as a fraction of the radius.
+@export var hill_height: float = 0.012
+## 0 = no lakes, 1 = lots of lakes.
+@export_range(0.0, 1.0) var lakes: float = 0.5
+## Height of the rocky ledges on mountains, in metres.
+@export var ledge_height_m: float = 14.0
+## 0 = smooth mountains, 1 = strong ledges.
+@export_range(0.0, 1.0) var ledge_strength: float = 0.45
+## Small bumps you notice when walking, in metres.
+@export var bump_height_m: float = 1.6
+## Size of those bumps, in metres.
+@export var bump_size_m: float = 24.0
+## Snow starts at this height, as a fraction of the radius.
+@export var snow_line: float = 0.11
+
+@export_group("Colours")
+@export var grass_light: Color = Color("7fc44c")
+@export var grass_dark: Color = Color("4c9c3c")
+@export var grass_dry: Color = Color("b3c45a")
+@export var forest_floor: Color = Color("3d8636")
+@export var rock_light: Color = Color("b9b3a8")
+@export var rock_dark: Color = Color("7d7972")
+@export var snow: Color = Color("f4f8fc")
+@export var sand: Color = Color("eadca6")
+@export var shallow_water: Color = Color("6fe0dc")
+@export var deep_water: Color = Color("1f78b0")
+@export var water: Color = Color("249fd8")
+@export var sky: Color = Color("6fb6f0")
+@export var horizon: Color = Color("cfe9fb")
+@export var atmosphere: Color = Color("8fd3ff")
+@export var cloud: Color = Color("ffffff")
+@export var cloud_shadow: Color = Color("c3d6e8")
+
+@export_group("Life")
+## Trees per square metre inside forests.
+@export var forest_density: float = 1.0 / 45.0
+## Trees per square metre on open grass.
+@export var open_tree_density: float = 1.0 / 1200.0
+## Boulders per square metre.
+@export var rock_density: float = 1.0 / 900.0
+## Number of cloud groups around the planet.
+@export var cloud_count: int = 70
+## Number of flat landing sites to find.
+@export var landing_sites: int = 8
