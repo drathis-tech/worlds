@@ -49,6 +49,7 @@ var _scatter: PlanetScatter
 
 
 func _ready() -> void:
+	add_to_group("planets")
 	shape = PlanetShape.new(preset, radius, planet_seed)
 	var sites := shape.find_landing_sites(preset.landing_sites, 30.0, planet_seed)
 
@@ -123,7 +124,7 @@ func _terrain_material() -> ShaderMaterial:
 	m.set_shader_parameter("planet_radius", radius)
 	m.set_shader_parameter("snow_line", preset.snow_line * radius)
 	for p in ["grass_light", "grass_dark", "grass_dry", "forest_floor", "rock_light", "rock_dark",
-			"snow", "sand", "shallow_water", "deep_water"]:
+			"snow", "snow_shadow", "ice", "taiga_grass", "sand", "shallow_water", "deep_water"]:
 		m.set_shader_parameter(p, preset.get(p))
 	return m
 
@@ -299,4 +300,11 @@ func _process(delta: float) -> void:
 	if _sky_material and altitude < radius * 3.0:
 		_sky_material.set_shader_parameter("planet_up", (global_basis * local.normalized()).normalized())
 		_sky_material.set_shader_parameter("space_amount", space)
-		_environment.fog_density = fog_density * (1.0 - space)
+		# Under water: thick blue-green fog so it feels like being in water.
+		if altitude < -0.05:
+			_environment.fog_light_color = preset.deep_water.lerp(preset.water, 0.4)
+			_environment.fog_density = 0.09
+		else:
+			_environment.fog_light_color = preset.horizon
+			_environment.fog_density = fog_density * (1.0 - space)
+		_environment.fog_enabled = _environment.fog_density > 0.0

@@ -5,7 +5,7 @@ render_mode diffuse_lambert_wrap;
 
 uniform float planet_radius = 1000.0;
 uniform float snow_line = 85.0;          // metres above sea level
-uniform float rock_slope = 0.72;         // steeper than this shows rock (1 = flat)
+uniform float rock_slope = 0.62;         // steeper than this shows rock (1 = flat, 0.62 = about 52 degrees)
 uniform vec4 grass_light : source_color = vec4(0.56, 0.82, 0.31, 1.0);
 uniform vec4 grass_dark : source_color = vec4(0.31, 0.66, 0.24, 1.0);
 uniform vec4 grass_dry : source_color = vec4(0.70, 0.77, 0.35, 1.0);
@@ -13,6 +13,9 @@ uniform vec4 forest_floor : source_color = vec4(0.24, 0.56, 0.22, 1.0);
 uniform vec4 rock_light : source_color = vec4(0.79, 0.77, 0.73, 1.0);
 uniform vec4 rock_dark : source_color = vec4(0.54, 0.53, 0.51, 1.0);
 uniform vec4 snow : source_color = vec4(0.96, 0.97, 0.99, 1.0);
+uniform vec4 snow_shadow : source_color = vec4(0.81, 0.87, 0.94, 1.0);
+uniform vec4 ice : source_color = vec4(0.75, 0.9, 0.96, 1.0);
+uniform vec4 taiga_grass : source_color = vec4(0.31, 0.54, 0.29, 1.0);
 uniform vec4 sand : source_color = vec4(0.92, 0.86, 0.65, 1.0);
 uniform vec4 shallow_water : source_color = vec4(0.44, 0.88, 0.86, 1.0);
 uniform vec4 deep_water : source_color = vec4(0.12, 0.47, 0.69, 1.0);
@@ -20,6 +23,8 @@ uniform vec4 deep_water : source_color = vec4(0.12, 0.47, 0.69, 1.0);
 varying vec3 v_pos;     // position in planet space
 varying vec3 v_normal;  // normal in planet space
 varying float v_forest;
+varying float v_cold;   // 0 warm .. 1 frozen (poles and snowy biomes)
+varying float v_ice;    // frozen sea
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -53,6 +58,8 @@ void vertex() {
 	v_pos = VERTEX;
 	v_normal = NORMAL;
 	v_forest = COLOR.r;
+	v_cold = COLOR.g;
+	v_ice = COLOR.b;
 }
 
 void fragment() {
@@ -74,6 +81,10 @@ void fragment() {
 	float dry = smoothstep(0.55, 0.75, fbm(v_pos * 0.006 + vec3(4.0)) + (mid - 0.5) * 0.3) * (1.0 - v_forest);
 	grass = mix(grass, grass_dry.rgb, dry * 0.6);
 	grass = mix(grass, forest_floor.rgb, v_forest * 0.85);
+	// colder places and high mountain ledges: darker, bluer alpine grass
+	float line0 = snow_line * (1.0 - smoothstep(0.3, 0.7, v_cold) * 0.85);
+	float alpine = max(smoothstep(0.15, 0.45, v_cold), smoothstep(line0 * 0.35, line0 * 0.75, h));
+	grass = mix(grass, taiga_grass.rgb * 0.95, alpine * 0.8);
 	grass *= 0.93 + fine * 0.14;
 
 	// Rock: horizontal layers that follow the ledges, broken up by noise.
@@ -90,14 +101,29 @@ void fragment() {
 
 	// Rock on steep ground and high up.
 	float rock_t = 1.0 - smoothstep(rock_slope - 0.05, rock_slope + 0.05, slope + (mid - 0.5) * 0.15);
-	rock_t = max(rock_t, smoothstep(snow_line * 0.6, snow_line * 0.85, h + (mid - 0.5) * 12.0));
+	// Just below the snow line, bare rock shows through on sloping ground.
+	float line = snow_line * (1.0 - smoothstep(0.3, 0.7, v_cold) * 0.85);
+	float high = smoothstep(line * 0.75, line * 0.95, h + (mid - 0.5) * 12.0);
+	rock_t = max(rock_t, high * (1.0 - smoothstep(0.8, 0.92, slope)));
 	col = mix(col, rock, rock_t * step(0.0, h));
 
-	// Snow settles on flat-ish high ground and on top of rock ledges.
-	float snow_h = smoothstep(snow_line - 10.0, snow_line + 2.0, h + (mid - 0.5) * 30.0);
+	// Snow settles on flat-ish high ground, on top of rock ledges, and
+	// everywhere flat in cold places. The snow line drops towards the poles.
+	float snow_h = smoothstep(line - 10.0, line + 2.0, h + (mid - 0.5) * 30.0);
+	float snow_cold = smoothstep(0.42, 0.55, v_cold + (mid - 0.5) * 0.25);
 	float snow_flat = smoothstep(0.5, 0.72, slope + (fine - 0.5) * 0.25);
-	float snow_t = snow_h * snow_flat;
-	col = mix(col, snow.rgb, snow_t);
+	float snow_t = max(snow_h, snow_cold) * snow_flat * step(-0.5, h);
+	// soft blue shading in dips and on steeper snow, like real snowdrifts
+	vec3 snow_col = mix(snow_shadow.rgb, snow.rgb, clamp(smoothstep(0.35, 0.8, slope) * (0.85 + fine * 0.15) + (big - 0.5) * 0.2, 0.0, 1.0));
+	col = mix(col, snow_col, snow_t);
+
+	// Frozen sea: pale blue ice with cracks and patches of snow.
+	if (v_ice > 0.01) {
+		float cracks = smoothstep(0.47, 0.5, vnoise(v_pos * 0.08)) * (1.0 - smoothstep(0.5, 0.53, vnoise(v_pos * 0.08)));
+		vec3 ice_col = mix(ice.rgb, ice.rgb * 0.82, cracks * near);
+		ice_col = mix(ice_col, snow.rgb, smoothstep(0.55, 0.75, mid + big * 0.3));
+		col = mix(col, ice_col, smoothstep(0.3, 0.9, v_ice) * step(0.0, h));
+	}
 
 	// Under water: sea floor tinted towards the water colour.
 	if (h < 0.0) {
@@ -122,6 +148,6 @@ void fragment() {
 	}
 
 	ALBEDO = col;
-	ROUGHNESS = mix(0.95, 0.55, snow_t);
+	ROUGHNESS = mix(mix(0.95, 0.55, snow_t), 0.25, smoothstep(0.3, 0.9, v_ice));
 	SPECULAR = 0.25;
 }

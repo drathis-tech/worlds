@@ -21,6 +21,9 @@ var _hills: FastNoiseLite
 var _lakes: FastNoiseLite
 var _bumps: FastNoiseLite
 var _patch: FastNoiseLite
+var _peaks: FastNoiseLite
+var _biome: FastNoiseLite
+var _cold_edge: FastNoiseLite
 
 # The six sides of the cube that gets blown up into a ball:
 # outward axis, u axis, v axis (u x v = outward).
@@ -51,6 +54,9 @@ func _init(p_preset: PlanetPreset, p_radius: float, p_seed: int) -> void:
 	_lakes = _make(s + 6, 3.5, 3, FastNoiseLite.FRACTAL_FBM)
 	_bumps = _make(s + 7, radius / preset.bump_size_m, 3, FastNoiseLite.FRACTAL_FBM)
 	_patch = _make(s + 8, 2.5, 4, FastNoiseLite.FRACTAL_FBM)
+	_peaks = _make(s + 10, preset.mountain_scale * 3.0, 3, FastNoiseLite.FRACTAL_FBM)
+	_biome = _make(s + 11, 2.2, 3, FastNoiseLite.FRACTAL_FBM)
+	_cold_edge = _make(s + 12, 9.0, 3, FastNoiseLite.FRACTAL_FBM)
 	_calibrate()
 
 
@@ -127,6 +133,33 @@ func mountain_mask(d: Vector3, land_t: float) -> float:
 	return smoothstep(0.04, 0.45, land_t) * smoothstep(1.0 - amount, 1.12 - amount * 0.7, region)
 
 
+## 0..1: how cold a spot is. Poles are cold, and so are some patches
+## elsewhere (snowy biomes). 0.5 and above is snowy ground.
+func coldness(d: Vector3) -> float:
+	var lat := absf(d.y)   # 0 at the equator, 1 at the poles
+	var wobble := _cold_edge.get_noise_3dv(d) * 0.06
+	var polar := smoothstep(preset.polar_cap - 0.1, preset.polar_cap + 0.05, lat + wobble)
+	var cold := 0.0
+	if preset.snowy_biomes > 0.0:
+		var b := _biome.get_noise_3dv(d) * 0.5 + 0.5 + wobble
+		var start := 1.0 - preset.snowy_biomes * 0.5
+		# no snowy patches near the equator
+		cold = smoothstep(start - 0.12, start + 0.04, b) * smoothstep(0.15, 0.5, lat)
+	return clampf(maxf(polar, cold), 0.0, 1.0)
+
+
+## Height (metres) where snow starts, for a given coldness. Matches the terrain shader.
+func snow_line_m(cold: float) -> float:
+	return preset.snow_line * radius * (1.0 - smoothstep(0.3, 0.7, cold) * 0.85)
+
+
+## 0..1: frozen sea (ice you can walk on) at a spot.
+func ice(d: Vector3) -> float:
+	if continent(d) >= _sea:
+		return 0.0
+	return smoothstep(0.62, 0.7, coldness(d))
+
+
 ## 0..1: forest density at a spot.
 func forest(d: Vector3) -> float:
 	return smoothstep(-0.05, 0.25, _patch.get_noise_3dv(d))
@@ -139,7 +172,13 @@ func raw_height(d: Vector3) -> Vector2:
 	var bumps := _bumps.get_noise_3dv(d) * preset.bump_height_m
 	if c < _sea:
 		var depth := (_sea - c) / maxf(1e-6, _sea - _c_min)
-		return Vector2(-preset.ocean_depth * radius * sqrt(depth) + bumps * 0.5, 0.0)
+		var sea_floor := -preset.ocean_depth * radius * sqrt(depth) + bumps * 0.5
+		# Near the poles the sea is frozen: a flat sheet of ice you can walk on,
+		# ending in a low ice cliff.
+		var ice_t := smoothstep(0.62, 0.7, coldness(d))
+		if ice_t > 0.0:
+			return Vector2(lerpf(sea_floor, 1.4 + bumps * 0.25, ice_t), 0.0)
+		return Vector2(sea_floor, 0.0)
 
 	# Heights are continuous at the coast, so shorelines stay smooth.
 	var land_t := (c - _sea) / maxf(1e-6, _c_max - _sea)
@@ -159,6 +198,17 @@ func raw_height(d: Vector3) -> Vector2:
 		var t := mh / step
 		var ledged := (floorf(t) + smoothstep(0.55, 1.0, t - floorf(t))) * step
 		h += lerpf(mh, ledged, preset.ledge_strength * smoothstep(4.0, 20.0, mh))
+
+	# Standalone hills and peaks outside the big ranges: good for climbing.
+	if preset.peak_amount > 0.0 and mask < 0.8:
+		var p := _peaks.get_noise_3dv(d) * 0.5 + 0.5
+		var start := 1.0 - preset.peak_amount * 0.55
+		var peak := smoothstep(start, start + 0.25, p)
+		if peak > 0.0:
+			var ph := preset.peak_height * radius * pow(peak, 1.6) * smoothstep(0.08, 0.3, land_t) * (1.0 - mask)
+			ph += _crags.get_noise_3dv(d) * 2.5 * smoothstep(8.0, 30.0, ph)
+			h += ph
+			mask = maxf(mask, peak * 0.5 * smoothstep(0.08, 0.3, land_t))
 
 	if preset.lakes > 0.0 and mask < 0.4:
 		var start := 0.42 - 0.22 * preset.lakes

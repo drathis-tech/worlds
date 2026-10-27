@@ -17,7 +17,11 @@ extends Resource
 ## Bigger = more, narrower mountain ridges.
 @export var mountain_scale: float = 3.0
 ## 0 = no mountains, 1 = mountains everywhere.
-@export_range(0.0, 1.0) var mountain_amount: float = 0.72
+@export_range(0.0, 1.0) var mountain_amount: float = 0.76
+## Standalone hills and peaks outside the ranges, as a fraction of the radius.
+@export var peak_height: float = 0.07
+## 0 = no standalone peaks, 1 = lots.
+@export_range(0.0, 1.0) var peak_amount: float = 0.55
 ## Rolling hills, as a fraction of the radius.
 @export var hill_height: float = 0.012
 ## 0 = no lakes, 1 = lots of lakes.
@@ -32,6 +36,10 @@ extends Resource
 @export var bump_size_m: float = 24.0
 ## Snow starts at this height, as a fraction of the radius.
 @export var snow_line: float = 0.11
+## Snowy polar caps start at this latitude (0 = equator, 1 = pole). Lower = bigger caps.
+@export_range(0.0, 1.0) var polar_cap: float = 0.72
+## 0 = no snowy areas away from the poles, 1 = lots of snowy biomes.
+@export_range(0.0, 1.0) var snowy_biomes: float = 0.4
 
 @export_group("Colours")
 @export var grass_light: Color = Color("7fc44c")
@@ -41,6 +49,9 @@ extends Resource
 @export var rock_light: Color = Color("b9b3a8")
 @export var rock_dark: Color = Color("7d7972")
 @export var snow: Color = Color("f4f8fc")
+@export var snow_shadow: Color = Color("dbe6f2")
+@export var ice: Color = Color("bfe6f4")
+@export var taiga_grass: Color = Color("4f8a4a")
 @export var sand: Color = Color("eadca6")
 @export var shallow_water: Color = Color("6fe0dc")
 @export var deep_water: Color = Color("1f78b0")
@@ -53,11 +64,11 @@ extends Resource
 
 @export_group("Life")
 ## Trees per square metre inside forests.
-@export var forest_density: float = 1.0 / 45.0
+@export var forest_density: float = 1.0 / 28.0
 ## Trees per square metre on open grass.
-@export var open_tree_density: float = 1.0 / 1200.0
+@export var open_tree_density: float = 1.0 / 600.0
 ## Boulders per square metre.
-@export var rock_density: float = 1.0 / 900.0
+@export var rock_density: float = 1.0 / 500.0
 ## Number of cloud groups around the planet.
 @export var cloud_count: int = 70
 ## Number of flat landing sites to find.

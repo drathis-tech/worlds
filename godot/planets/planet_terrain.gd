@@ -249,6 +249,7 @@ func _make_piece(n: QuadNode, job: Dictionary) -> void:
 		shape_res.set_faces(job["faces"])
 		shape_res.backface_collision = true
 		var body := StaticBody3D.new()
+		body.add_to_group("planet_ground")   # lets characters know it's climbable ground
 		var col := CollisionShape3D.new()
 		col.shape = shape_res
 		body.add_child(col)
@@ -306,8 +307,10 @@ func _build(job: Dictionary) -> void:
 			verts[v] = pos[k]
 			normals[v] = du.cross(dv).normalized()
 			var d := dirs[k]
-			# Extra data for the shader: forest amount and mountain amount.
-			colors[v] = Color(shape.forest(d), 0.0, 0.0, 1.0)
+			# Extra data for the shader: forest amount, coldness, frozen sea.
+			var cold := shape.coldness(d)
+			var frozen := shape.ice(d) if cold > 0.6 else 0.0
+			colors[v] = Color(shape.forest(d), cold, frozen, 1.0)
 
 	var idx := PackedInt32Array()
 	for i in n:

@@ -29,6 +29,10 @@ float vnoise(vec3 x) {
 
 void vertex() {
 	v_pos = VERTEX;
+	// Seen from far away, sink the water a little under the ground so coasts
+	// and polar ice don't flicker (the depth buffer gets coarse with distance).
+	float cam_dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
+	VERTEX -= normalize(VERTEX) * clamp((cam_dist - 300.0) * 0.003, 0.0, 8.0);
 }
 
 void fragment() {

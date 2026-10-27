@@ -61,6 +61,20 @@ C = {k: hex_color(v) for k, v in {
     "rock_light": "#d3cfc7",
     "grass_dark": "#3f9a34",
     "grass_tip": "#a8de62",
+    "fir_dark": "#1f5a3a",
+    "fir": "#2b7448",
+    "fir_tip": "#4f9a62",
+    "birch_bark": "#ece8df",
+    "birch_mark": "#3a3632",
+    "birch_leaf_dark": "#6aa83c",
+    "birch_leaf": "#9ccf4e",
+    "birch_leaf_tip": "#cbe87a",
+    "log_inner": "#c89a64",
+    "flower_stem": "#4a9a3a",
+    "flower_yellow": "#ffd84a",
+    "flower_white": "#fafafa",
+    "flower_pink": "#f48fb8",
+    "flower_purple": "#a77be0",
 }.items()}
 
 
@@ -139,8 +153,9 @@ def bark(p, n):
     return lerp(C["trunk_dark"], C["trunk"], 0.5 + p.z * 0.1)
 
 
-def make_pine(name, height, tiers, width, snowy, seed):
+def make_pine(name, height, tiers, width, snowy, seed, colors=("pine_dark", "pine", "pine_tip")):
     rng = random.Random(seed)
+    dark, mid, tip = (C[k] for k in colors)
     b = Builder()
     b.add_bmesh(cylinder(7, width * 0.09, width * 0.05, -0.4, height * 0.5), bark)
     base = height * 0.18
@@ -156,8 +171,8 @@ def make_pine(name, height, tiers, width, snowy, seed):
         def color(p, n, z0=z0, z1=z1, r=r):
             k = (p.z - z0) / max(0.01, z1 - z0)
             outer = min(1.0, Vector((p.x, p.y)).length / max(0.01, r))
-            c = lerp(C["pine_dark"], C["pine"], k * 0.8 + 0.2)
-            c = lerp(c, C["pine_tip"], outer * 0.45 * (1.0 - k))
+            c = lerp(dark, mid, k * 0.8 + 0.2)
+            c = lerp(c, tip, outer * 0.45 * (1.0 - k))
             if snowy and n.z > 0.25:
                 c = lerp(c, lerp(C["snow_shadow"], C["snow"], n.z), min(1.0, (n.z - 0.25) * 3.0))
             return c
@@ -203,7 +218,7 @@ def make_bush(name, size, seed):
     return b.finish(name)
 
 
-def make_rock(name, size, squash, seed, sharp=True):
+def make_rock(name, size, squash, seed, sharp=True, snowy=False):
     rng = random.Random(seed)
     b = Builder()
     bm = blob(3, size * 0.5, (0, 0, size * 0.18 * squash), rng, 0.32, squash)
@@ -214,9 +229,91 @@ def make_rock(name, size, squash, seed, sharp=True):
 
     def color(p, n):
         c = lerp(C["rock_dark"], C["rock"], 0.5 + n.z * 0.5)
-        return lerp(c, C["rock_light"], max(0.0, n.z - 0.5))
+        c = lerp(c, C["rock_light"], max(0.0, n.z - 0.5))
+        if snowy and n.z > 0.3:
+            c = lerp(c, lerp(C["snow_shadow"], C["snow"], n.z), min(1.0, (n.z - 0.3) * 4.0))
+        return c
 
     b.add_bmesh(bm, color, smooth=not sharp)
+    return b.finish(name)
+
+
+def make_birch(name, height, seed):
+    """A slim white-barked tree with light, airy leaves."""
+    rng = random.Random(seed)
+    b = Builder()
+
+    def birch_bark(p, n):
+        # dark horizontal marks on white bark
+        mark = math.sin(p.z * 9.0 + math.sin(p.z * 3.1) * 2.0 + math.atan2(p.y, p.x) * 1.5)
+        return C["birch_mark"] if mark > 0.93 else C["birch_bark"]
+
+    b.add_bmesh(cylinder(8, 0.2, 0.1, -0.4, height * 0.78), birch_bark)
+    crown = []
+    for i in range(7):
+        a = rng.uniform(0, math.tau)
+        zt = rng.uniform(0.45, 0.95)
+        rr = height * 0.16 * (1.0 - zt * 0.5) * rng.uniform(0.5, 1.0)
+        crown.append(((math.cos(a) * rr, math.sin(a) * rr, height * zt), height * rng.uniform(0.12, 0.18)))
+
+    def color(p, n):
+        c = lerp(C["birch_leaf_dark"], C["birch_leaf"], (p.z - height * 0.4) / (height * 0.6))
+        return lerp(c, C["birch_leaf_tip"], max(0.0, n.z) * 0.4)
+
+    for center, r in crown:
+        b.add_bmesh(blob(2, r, center, rng, 0.22, 0.85), color)
+    return b.finish(name)
+
+
+def make_log(name, length, radius, seed):
+    """A fallen log lying on the ground, with cut ends."""
+    rng = random.Random(seed)
+    b = Builder()
+    bm = bmesh.new()
+    seg = 9
+    rings = []
+    for k in range(3):
+        x = -length / 2 + length * k / 2
+        ring = []
+        for i in range(seg):
+            a = i / seg * math.tau
+            r = radius * (1.0 + rng.uniform(-0.06, 0.06)) * (1.0 - 0.15 * (k == 2))
+            ring.append(bm.verts.new((x, math.cos(a) * r, math.sin(a) * r + radius * 0.75)))
+        rings.append(ring)
+    for k in range(2):
+        for i in range(seg):
+            j = (i + 1) % seg
+            bm.faces.new((rings[k][i], rings[k][j], rings[k + 1][j], rings[k + 1][i]))
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[2])
+
+    def color(p, n):
+        if abs(n.x) > 0.8:
+            return C["log_inner"]  # cut ends show the light wood
+        return bark(p, n)
+
+    b.add_bmesh(bm, color, smooth=False)
+    return b.finish(name)
+
+
+def make_flowers(name, seed):
+    """A small patch of wild flowers (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    colors = ["flower_yellow", "flower_white", "flower_pink", "flower_purple"]
+    for i in range(7):
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.3), math.sin(a) * rng.uniform(0, 0.3)
+        h = rng.uniform(0.25, 0.45)
+        stem = cylinder(4, 0.012, 0.01, -0.05, h)
+        stem.verts.ensure_lookup_table()
+        for v in stem.verts:
+            v.co.x += x
+            v.co.y += y
+        b.add_bmesh(stem, lambda p, n: C["flower_stem"], smooth=False)
+        petal = C[colors[(i + seed) % len(colors)]]
+        head = blob(1, 0.06, (x, y, h), rng, 0.25, 0.5)
+        b.add_bmesh(head, lambda p, n, petal=petal: petal, smooth=False)
     return b.finish(name)
 
 
@@ -288,6 +385,12 @@ def build_all():
         (make_rock("RockFlat", 2.2, 0.45, 7), solid),
         (make_rock("Boulder", 4.5, 0.75, 8), solid),
         (make_grass("Grass", 9), two_sided),
+        (make_pine("Fir", 12.0, 8, 1.8, False, 10, ("fir_dark", "fir", "fir_tip")), solid),
+        (make_pine("FirSnowy", 11.0, 8, 1.9, True, 11, ("fir_dark", "fir", "fir_tip")), solid),
+        (make_birch("Birch", 9.0, 12), solid),
+        (make_log("Log", 5.0, 0.35, 13), solid),
+        (make_flowers("Flowers", 14), two_sided),
+        (make_rock("RockSnowy", 1.6, 0.75, 15, snowy=True), solid),
     ]
     objects = []
     for i, (me, mat) in enumerate(models):

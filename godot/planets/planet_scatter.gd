@@ -63,37 +63,51 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 	var placed := {}      # model name -> Array[Transform3D]
 	var colliders := []   # [Transform3D, radius, height] (height 0 = ball)
 
-	var tries := int(area * maxf(preset.forest_density, preset.open_tree_density))
-	tries += int(area * preset.rock_density)
+	var tree_max := maxf(preset.forest_density, preset.open_tree_density)
+	var tries := int(area * (tree_max + preset.rock_density))
 	for _i in tries:
 		var d := PlanetShape.cube_dir(face, a0 + rng.randf() * size, b0 + rng.randf() * size)
 		var h := shape.height(d)
 		if h < 1.2 or shape.in_landing_site(d):
 			continue
+		var cold := shape.coldness(d)
+		var frozen_sea := shape.ice(d) > 0.3
 		var slope := _slope(d, h)
-		var is_rock := rng.randf() < preset.rock_density / (preset.rock_density + maxf(preset.forest_density, preset.open_tree_density))
+		var snow_here := shape.snow_line_m(cold)
 		var kind := ""
 		var s := 1.0
-		if is_rock:
+		if rng.randf() < preset.rock_density / (preset.rock_density + tree_max):
+			# Rocks and boulders
 			if slope < 0.55:
 				continue
 			var r := rng.randf()
-			kind = "Boulder" if r < 0.15 else ("RockFlat" if r < 0.5 else "Rock")
+			if cold > 0.45 or h > snow_here:
+				kind = "Boulder" if r < 0.12 else "RockSnowy"
+			else:
+				kind = "Boulder" if r < 0.15 else ("RockFlat" if r < 0.5 else "Rock")
 			s = rng.randf_range(0.6, 1.5)
 		else:
-			if slope < 0.86 or h > snow * 0.92:
+			# Trees, bushes, logs and flowers, depending on the biome
+			if frozen_sea or slope < 0.86 or h > snow_here * 0.95:
 				continue
 			var f := shape.forest(d)
 			var density := lerpf(preset.open_tree_density, preset.forest_density, f)
-			if rng.randf() * maxf(preset.forest_density, preset.open_tree_density) > density:
+			if cold > 0.5:
+				density *= 0.35   # snowfields: scattered trees
+			if rng.randf() * tree_max > density:
 				continue
-			if h > snow * 0.55:
-				kind = "PineSnowy"
+			var r := rng.randf()
+			if cold > 0.5 or h > snow_here * 0.6:
+				kind = "FirSnowy" if r < 0.55 else "PineSnowy"
+			elif cold > 0.2:
+				# taiga: dark firs and pines, a little snow
+				kind = "Fir" if r < 0.5 else ("PineSnowy" if r < 0.65 else ("Pine" if r < 0.92 else "Log"))
 			elif f > 0.35:
-				kind = "PineTall" if rng.randf() < 0.35 else "Pine"
+				# forest: mixed pines and birches, fallen logs
+				kind = "PineTall" if r < 0.3 else ("Pine" if r < 0.6 else ("Birch" if r < 0.85 else ("Log" if r < 0.93 else "Bush")))
 			else:
-				var r := rng.randf()
-				kind = "RoundTree" if r < 0.55 else ("Bush" if r < 0.85 else "Pine")
+				# meadow: round trees, birches, bushes and flowers
+				kind = "RoundTree" if r < 0.3 else ("Birch" if r < 0.45 else ("Bush" if r < 0.7 else "Flowers"))
 			s = rng.randf_range(0.75, 1.3)
 		if not meshes.has(kind):
 			continue
@@ -103,26 +117,34 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 		if not placed.has(kind):
 			placed[kind] = []
 		placed[kind].append(t)
-		if kind.begins_with("Pine") or kind == "RoundTree":
+		if kind.begins_with("Pine") or kind.begins_with("Fir") or kind == "RoundTree" or kind == "Birch":
 			colliders.append([t.origin + up * 2.0 * s, 0.35 * s, 4.0 * s])
-		elif kind == "Boulder" or (kind == "Rock" and s > 1.0):
+		elif kind == "Boulder" or ((kind == "Rock" or kind == "RockSnowy") and s > 1.0):
 			var size_m := (4.5 if kind == "Boulder" else 1.4) * s
 			colliders.append([t.origin + up * size_m * 0.2, size_m * 0.42, 0.0])
 
-	# Grass tufts on gentle, low, open ground.
+	# Grass tufts and wild flowers on gentle, low, open, warm ground.
 	if meshes.has("Grass"):
 		var grass := []
+		var flowers := []
 		var tufts := int(area * GRASS_DENSITY)
 		for _i in tufts:
 			var d := PlanetShape.cube_dir(face, a0 + rng.randf() * size, b0 + rng.randf() * size)
 			var h := shape.height(d)
 			if h < 1.5 or h > snow * 0.6 or shape.in_landing_site(d):
 				continue
-			if _slope(d, h) < 0.88:
+			if shape.coldness(d) > 0.42 or _slope(d, h) < 0.88:
 				continue
 			var b := basis_with_up(d).rotated(d, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.7, 1.4))
-			grass.append(Transform3D(b, d * (R + h)))
+			if meshes.has("Flowers") and rng.randf() < 0.04 and shape.forest(d) < 0.3:
+				flowers.append(Transform3D(b, d * (R + h)))
+			else:
+				grass.append(Transform3D(b, d * (R + h)))
 		placed["Grass"] = grass
+		if not flowers.is_empty():
+			if not placed.has("Flowers"):
+				placed["Flowers"] = []
+			placed["Flowers"].append_array(flowers)
 
 	return {"placed": placed, "colliders": colliders}
 
@@ -157,11 +179,12 @@ func build_node(data: Dictionary) -> Node3D:
 			mm.set_instance_transform(i, list[i])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
-		mmi.material_override = _two_sided if kind == "Grass" else _solid
-		var dist := GRASS_DISTANCE if kind == "Grass" else draw_distance
+		var small: bool = kind == "Grass" or kind == "Flowers"
+		mmi.material_override = _two_sided if small else _solid
+		var dist := GRASS_DISTANCE if small else draw_distance
 		mmi.visibility_range_end = dist
 		mmi.visibility_range_end_margin = dist * 0.1
-		if kind == "Grass":
+		if small:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		holder.add_child(mmi)
 
