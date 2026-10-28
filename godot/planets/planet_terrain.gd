@@ -285,11 +285,15 @@ func _build(job: Dictionary) -> void:
 	pos.resize(w * w)
 	var dirs := PackedVector3Array()
 	dirs.resize(w * w)
+	var trails := PackedFloat32Array()
+	trails.resize(w * w)
 	for i in w:
 		for j in w:
 			var d := PlanetShape.cube_dir(face, a0 + (i - 1) * step, b0 + (j - 1) * step)
+			var sm := shape.sample(d)
 			dirs[i * w + j] = d
-			pos[i * w + j] = d * (R + shape.height(d))
+			trails[i * w + j] = sm.z
+			pos[i * w + j] = d * (R + sm.x)
 
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -307,10 +311,10 @@ func _build(job: Dictionary) -> void:
 			verts[v] = pos[k]
 			normals[v] = du.cross(dv).normalized()
 			var d := dirs[k]
-			# Extra data for the shader: forest amount, coldness, frozen sea.
+			# Extra data for the shader: forest amount, coldness, frozen sea, trail.
 			var cold := shape.coldness(d)
 			var frozen := shape.ice(d) if cold > 0.6 else 0.0
-			colors[v] = Color(shape.forest(d), cold, frozen, 1.0)
+			colors[v] = Color(shape.forest(d), cold, frozen, trails[k])
 
 	var idx := PackedInt32Array()
 	for i in n:

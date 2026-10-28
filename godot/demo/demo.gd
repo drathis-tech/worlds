@@ -6,11 +6,16 @@ extends Node3D
 ##   godot --path godot -- --test-walk   checks landing, walking and running
 ##   godot --path godot -- --test-swim   checks swimming to a shore and climbing out
 ##   godot --path godot -- --test-climb  checks climbing a steep rock face
+##   godot --path godot -- --test-fly    flies up to space and back down
 
 @onready var planet: Planet = $Planet
 
+var _hud: Label
+
 
 func _ready() -> void:
+	if not "--shots" in OS.get_cmdline_user_args():
+		_make_hud()
 	if "--shots" in OS.get_cmdline_user_args():
 		_take_shots.call_deferred()
 	elif "--test-walk" in OS.get_cmdline_user_args():
@@ -19,6 +24,88 @@ func _ready() -> void:
 		_test_swim.call_deferred()
 	elif "--test-climb" in OS.get_cmdline_user_args():
 		_test_climb.call_deferred()
+	elif "--test-fly" in OS.get_cmdline_user_args():
+		_test_fly.call_deferred()
+
+
+## On-screen info: what you're doing, altitude, speed and the controls.
+func _make_hud() -> void:
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	_hud = Label.new()
+	_hud.position = Vector2(16, 12)
+	_hud.add_theme_font_size_override("font_size", 18)
+	_hud.add_theme_color_override("font_color", Color(1, 1, 1))
+	_hud.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	_hud.add_theme_constant_override("outline_size", 5)
+	layer.add_child(_hud)
+
+
+func _process(_delta: float) -> void:
+	if _hud == null:
+		return
+	var w: PlanetWalker = $Walker
+	var mode := "WALKING"
+	if w.flying:
+		mode = "FLYING"
+	elif w.swimming:
+		mode = "SWIMMING"
+	elif w.climbing:
+		mode = "CLIMBING"
+	var alt := w.altitude()
+	var where := "in space" if alt > planet.radius * 0.6 else ("in the sky" if alt > 60.0 else "")
+	_hud.text = "%s   altitude %d m %s   speed %d m/s\n" % [mode, roundi(alt), where, roundi(w.velocity.length())]
+	_hud.text += "WASD move · mouse look · Shift run · Space jump/up · C down · F fly · Esc mouse"
+
+
+## Flies straight up to space and checks nothing breaks on the way.
+func _test_fly() -> void:
+	var walker: PlanetWalker = $Walker
+	await planet.loaded
+	walker.set_flying(true)
+	_press(KEY_SPACE, true)
+	_press(KEY_SHIFT, true)
+	var t0 := Time.get_ticks_msec()
+	var reached := -1.0
+	for i in 40 * 60:
+		await get_tree().physics_frame
+		if walker.altitude() > planet.radius * 1.5:
+			reached = (Time.get_ticks_msec() - t0) / 1000.0
+			break
+	_press(KEY_SPACE, false)
+	_press(KEY_SHIFT, false)
+	walker.velocity = Vector3.ZERO
+	if reached < 0.0:
+		print("Fly test FAILED: only got to %d m" % roundi(walker.altitude()))
+		get_tree().quit()
+		return
+	print("Fly test: reached space (%d m up) in %.1f s" % [roundi(walker.altitude()), reached])
+	# look back down at the planet and let the far-away ground settle
+	walker.camera.rotation.x = -1.35
+	for i in 600:
+		await get_tree().process_frame
+		if i > 10 and planet.terrain.is_idle():
+			break
+	var pieces := 0
+	for c in planet.terrain.get_children():
+		if c is MeshInstance3D and c.visible:
+			pieces += 1
+	print("From space: %d ground pieces showing (detail drops far away, as it should)" % pieces)
+	if DisplayServer.get_name() != "headless":
+		get_viewport().get_texture().get_image().save_png("user://shot_space_from_walker.png")
+		print("Saved ", ProjectSettings.globalize_path("user://shot_space_from_walker.png"))
+	# fly back down and check the ground comes back in detail
+	walker.camera.rotation.x = 0.0
+	_press(KEY_C, true)
+	for i in 60 * 60:
+		await get_tree().physics_frame
+		if walker.altitude() < 120.0:
+			break
+	_press(KEY_C, false)
+	walker.velocity = Vector3.ZERO
+	await get_tree().create_timer(1.0).timeout
+	print("Back down at %d m altitude" % roundi(walker.altitude()))
+	get_tree().quit()
 
 
 func _press(code: Key, down: bool) -> void:
@@ -233,6 +320,37 @@ func _take_shots() -> void:
 		var dir := (land - icy)
 		dir = (dir - iu * dir.dot(iu)).normalized()
 		shots.append(["ice", icy + iu * 6.0 - dir * 20.0, land + iu * 10.0])
+	# Standing on a dirt trail, looking along it.
+	var trail_spot := Vector3.ZERO
+	for i in 20000:
+		var d := PlanetShape.fibonacci_dir(i, 20000)
+		var sm := planet.shape.sample(d)
+		if sm.z > 0.8 and sm.x > 4.0 and planet.shape.coldness(d) < 0.2 and planet.shape.forest(d) > 0.25:
+			trail_spot = planet.to_global(d * (planet.radius + sm.x))
+			break
+	if trail_spot != Vector3.ZERO:
+		var tu2 := planet.up_at(trail_spot)
+		var t1 := tu2.cross(Vector3.UP if absf(tu2.y) < 0.9 else Vector3.RIGHT).normalized()
+		var best_dir2 := t1
+		var best_score := -1.0
+		for k in 36:
+			var dir3 := t1.rotated(tu2, k * TAU / 36.0)
+			var score := 0.0
+			for step in [10.0, 20.0, 30.0]:
+				score += planet.shape.sample(planet.to_local(trail_spot + dir3 * step).normalized()).z
+			if score > best_score:
+				best_score = score
+				best_dir2 = dir3
+		shots.insert(1, ["trail", trail_spot + tu2 * 1.7 - best_dir2 * 3.0, trail_spot + best_dir2 * 40.0 + tu2 * 1.0])
+		shots.insert(2, ["trail_above", trail_spot + tu2 * 28.0 - best_dir2 * 25.0, trail_spot + best_dir2 * 50.0])
+	# Inside a forest, at eye level.
+	var forest_spot := _find_spot(func(d: Vector3) -> bool:
+		return planet.shape.forest(d) > 0.8 and planet.shape.coldness(d) < 0.1 and planet.shape.sample(d).z < 0.1 \
+				and planet.shape.height(d) > 6.0 and planet.shape.raw_height(d).y < 0.1)
+	if forest_spot != Vector3.ZERO:
+		var fu := planet.up_at(forest_spot)
+		var ff := fu.cross(Vector3.UP if absf(fu.y) < 0.9 else Vector3.RIGHT).normalized()
+		shots.insert(3, ["forest", forest_spot + fu * 1.7, forest_spot + ff * 30.0 + fu * 2.5])
 	# From the top of the highest nearby hill, looking out over the land.
 	var best_top := p
 	var best_dir := toward

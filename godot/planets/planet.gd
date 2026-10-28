@@ -127,7 +127,8 @@ func _terrain_material() -> ShaderMaterial:
 	m.set_shader_parameter("planet_radius", radius)
 	m.set_shader_parameter("snow_line", preset.snow_line * radius)
 	for p in ["grass_light", "grass_dark", "grass_dry", "forest_floor", "rock_light", "rock_dark",
-			"snow", "snow_shadow", "ice", "taiga_grass", "sand", "shallow_water", "deep_water"]:
+			"snow", "snow_shadow", "ice", "taiga_grass", "sand", "shallow_water", "deep_water",
+			"dirt", "dirt_dark"]:
 		m.set_shader_parameter(p, preset.get(p))
 	return m
 

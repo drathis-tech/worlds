@@ -10,6 +10,8 @@ extends CharacterBody3D
 ##   WASD / arrows  move          Shift  run          mouse  look
 ##   Space          jump, or swim up in water
 ##   C              swim down
+##   F              fly on / off. While flying: Space up, C down, Shift fast.
+##                  You speed up the higher you go, so space is a few seconds away.
 ##   Walk into a steep rock face to climb it. At a shore, swim into the bank
 ##   to climb out. Esc frees the mouse.
 
@@ -22,6 +24,8 @@ extends CharacterBody3D
 ## Slopes up to this angle are walkable. Steeper ones can be climbed.
 @export var max_walk_angle_degrees: float = 52.0
 @export var mouse_sensitivity: float = 0.003
+## Flying speed near the ground, in m/s. It grows with altitude.
+@export var fly_speed: float = 20.0
 
 @onready var camera: Camera3D = $Camera3D
 
@@ -31,6 +35,8 @@ var _planet: Node3D
 var swimming := false
 ## True while climbing a steep face.
 var climbing := false
+## True while flying (press F).
+var flying := false
 
 
 func _ready() -> void:
@@ -45,10 +51,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate_object_local(Vector3.UP, -event.relative.x * mouse_sensitivity)
 		_pitch = clampf(_pitch - event.relative.y * mouse_sensitivity, -1.4, 1.4)
 		camera.rotation.x = _pitch
+	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F:
+		set_flying(not flying)
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func set_flying(on: bool) -> void:
+	flying = on
+	velocity = Vector3.ZERO
+
+
+## Height above sea level in metres (or 0 if there is no planet).
+func altitude() -> float:
+	if _planet == null:
+		_planet = get_tree().get_first_node_in_group("planets") as Node3D
+	if _planet == null or not _planet.has_method("altitude_of"):
+		return 0.0
+	return _planet.altitude_of(global_position)
 
 
 ## How deep the middle of the body is under the water surface (negative = above).
@@ -83,7 +105,23 @@ func _physics_process(delta: float) -> void:
 	var pushing_wall := is_on_wall() and input.y < -0.1 and _wall_is_steep()
 	climbing = pushing_wall and not is_on_floor()
 
-	if swimming:
+	if flying:
+		swimming = false
+		climbing = false
+		# Fly where the camera looks. Faster the higher you are, so you can
+		# reach space quickly but still fly slowly near the ground.
+		var look := camera.global_transform.basis
+		var dir := -look.z * -input.y + look.x * input.x
+		if Input.is_key_pressed(KEY_SPACE):
+			dir += up
+		if Input.is_key_pressed(KEY_C):
+			dir -= up
+		var speed := fly_speed * (1.0 + maxf(altitude(), 0.0) / 35.0)
+		if Input.is_key_pressed(KEY_SHIFT):
+			speed *= 4.0
+		speed = minf(speed, 4000.0)
+		velocity = velocity.lerp(dir.limit_length(1.0) * speed, 1.0 - exp(-4.0 * delta))
+	elif swimming:
 		# Float with the head above water; Space swims up, C dives.
 		var target := 0.25   # body middle this far under the surface
 		var float_force := clampf((depth - target) * 4.0, -6.0, 6.0)

@@ -19,12 +19,15 @@ uniform vec4 taiga_grass : source_color = vec4(0.31, 0.54, 0.29, 1.0);
 uniform vec4 sand : source_color = vec4(0.92, 0.86, 0.65, 1.0);
 uniform vec4 shallow_water : source_color = vec4(0.44, 0.88, 0.86, 1.0);
 uniform vec4 deep_water : source_color = vec4(0.12, 0.47, 0.69, 1.0);
+uniform vec4 dirt : source_color = vec4(0.58, 0.45, 0.31, 1.0);
+uniform vec4 dirt_dark : source_color = vec4(0.40, 0.30, 0.21, 1.0);
 
 varying vec3 v_pos;     // position in planet space
 varying vec3 v_normal;  // normal in planet space
 varying float v_forest;
 varying float v_cold;   // 0 warm .. 1 frozen (poles and snowy biomes)
 varying float v_ice;    // frozen sea
+varying float v_trail;  // dirt trail
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -60,6 +63,7 @@ void vertex() {
 	v_forest = COLOR.r;
 	v_cold = COLOR.g;
 	v_ice = COLOR.b;
+	v_trail = COLOR.a;
 }
 
 void fragment() {
@@ -89,6 +93,20 @@ void fragment() {
 	// up close: clumps of lighter and darker grass
 	float clump = mix(0.5, vnoise(v_pos * 1.3) * 0.6 + vnoise(v_pos * 3.1) * 0.4, near);
 	grass *= 0.9 + clump * 0.2;
+	// Large areas each get their own tint, so the land never looks the same
+	// for long: bluer greens in some places, warmer yellow-greens in others.
+	float region = fbm(v_pos * 0.0028 + vec3(11.0, 3.0, 7.0));
+	grass = mix(grass, grass * vec3(0.86, 1.0, 1.08), smoothstep(0.55, 0.75, region));
+	grass = mix(grass, grass * vec3(1.12, 1.04, 0.78), smoothstep(0.45, 0.25, region) * (1.0 - v_forest));
+	// bare, earthy patches on the forest floor
+	float earth = smoothstep(0.55, 0.7, fbm(v_pos * 0.05 + vec3(5.0)) + (fine - 0.5) * 0.3) * v_forest;
+	grass = mix(grass, dirt_dark.rgb * 1.1, earth * 0.55 * (1.0 - smoothstep(200.0, 400.0, dist)));
+	// beyond where flowers are drawn, little dots of colour keep meadows lively
+	float mid_range = smoothstep(30.0, 50.0, dist) * (1.0 - smoothstep(140.0, 220.0, dist));
+	vec3 cell = floor(v_pos * 1.5);
+	float speck = step(0.982, hash(cell)) * (1.0 - v_forest) * (1.0 - smoothstep(0.1, 0.3, v_cold)) * mid_range;
+	vec3 petal = mix(vec3(1.0, 0.85, 0.3), vec3(0.95, 0.55, 0.75), step(0.5, hash(cell + 3.3)));
+	grass = mix(grass, petal, speck * 0.8);
 
 	// Rock: horizontal layers that follow the ledges, broken up by noise.
 	float layers = sin(h * 0.45 + mid * 6.0 + big * 4.0) * 0.5 + 0.5;
@@ -126,6 +144,23 @@ void fragment() {
 		vec3 ice_col = mix(ice.rgb, ice.rgb * 0.82, cracks * near);
 		ice_col = mix(ice_col, snow.rgb, smoothstep(0.55, 0.75, mid + big * 0.3));
 		col = mix(col, ice_col, smoothstep(0.3, 0.9, v_ice) * step(0.0, h));
+	}
+
+	// Dirt trails: worn earth with ragged grassy edges and little stones.
+	float trail = smoothstep(0.3, 0.65, v_trail + (fine - 0.5) * 0.35 + (mid - 0.5) * 0.15) * step(0.2, h);
+	trail *= smoothstep(0.8, 0.93, slope);   // trails stay on gentle ground
+	trail *= 1.0 - smoothstep(250.0, 450.0, dist);   // too thin to see from far away
+	if (trail > 0.01) {
+		float worn = vnoise(v_pos * 0.6) * 0.6 + vnoise(v_pos * 2.3) * 0.4;
+		vec3 path = mix(dirt_dark.rgb, dirt.rgb, clamp(worn * 1.2 + (v_trail - 0.6) * 0.8, 0.0, 1.0));
+		vec3 sc = v_pos * 1.7;
+		vec3 sid = floor(sc);
+		vec3 sp = vec3(hash(sid), hash(sid + 1.7), hash(sid + 4.1)) * 0.6 + 0.2;
+		float stones = step(0.72, hash(sid + 9.3)) * (1.0 - smoothstep(0.07, 0.12, length(fract(sc) - sp) - hash(sid) * 0.06)) * near;
+		path = mix(path, mix(rock_dark.rgb, rock_light.rgb, hash(sid + 2.2)), stones * 0.9);
+		// on snow, trails are trodden-down grey snow instead
+		path = mix(path, mix(snow_shadow.rgb, dirt.rgb, 0.25), snow_t * 0.85);
+		col = mix(col, path, trail);
 	}
 
 	// Under water: sea floor tinted towards the water colour.

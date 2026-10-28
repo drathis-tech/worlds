@@ -26,7 +26,7 @@ import sys
 
 import bmesh
 import bpy
-from mathutils import Vector, noise
+from mathutils import Matrix, Vector, noise
 
 COLLECTION = "OrbitOafs_Props"
 
@@ -77,6 +77,15 @@ C = {k: hex_color(v) for k, v in {
     "flower_purple": "#a77be0",
     "fern_dark": "#2f7a34",
     "fern": "#6cbf48",
+    "dead_dark": "#5e5249",
+    "dead": "#a39686",
+    "reed_dark": "#4d8a3a",
+    "reed": "#a8c860",
+    "cattail": "#6b4428",
+    "mushroom_stem": "#f1e8d6",
+    "mushroom_red": "#d8452f",
+    "mushroom_brown": "#a8774a",
+    "tall_grass_tip": "#d4dc78",
 }.items()}
 
 
@@ -392,6 +401,120 @@ def make_pebbles(name, seed):
     return b.finish(name)
 
 
+def make_stump(name, seed):
+    """A cut tree stump with a few roots."""
+    rng = random.Random(seed)
+    b = Builder()
+    r = rng.uniform(0.3, 0.45)
+    h = rng.uniform(0.35, 0.7)
+    bm = cylinder(9, r * 1.15, r, -0.2, h)
+    top = [v for v in bm.verts if v.co.z > h - 0.01]
+    bm.faces.new(top)
+    b.add_bmesh(bm, lambda p, n: C["log_inner"] if n.z > 0.8 else bark(p, n), smooth=False)
+    for k in range(4):
+        a = k / 4 * math.tau + rng.uniform(-0.4, 0.4)
+        root = cylinder(5, 0.1, 0.04, 0.0, 0.7)
+        for v in root.verts:
+            v.co = Matrix.Rotation(a, 4, "Z") @ (Matrix.Rotation(1.25, 4, "X") @ v.co) + Vector((0, 0, 0.12))
+        b.add_bmesh(root, bark, smooth=False)
+    return b.finish(name)
+
+
+def make_dead_tree(name, height, seed):
+    """A bare, grey, weathered tree."""
+    rng = random.Random(seed)
+    b = Builder()
+
+    def wood(p, n):
+        return lerp(C["dead_dark"], C["dead"], 0.4 + 0.6 * min(1.0, p.z / height))
+
+    b.add_bmesh(cylinder(7, 0.28, 0.1, -0.4, height), wood)
+    for _ in range(rng.randint(4, 6)):
+        z = rng.uniform(height * 0.35, height * 0.85)
+        a = rng.uniform(0, math.tau)
+        length = rng.uniform(1.0, 2.4) * (1.1 - z / height)
+        branch = cylinder(5, 0.08, 0.025, 0.0, length)
+        tilt = rng.uniform(0.6, 1.1)
+        for v in branch.verts:
+            v.co = Matrix.Rotation(a, 4, "Z") @ (Matrix.Rotation(tilt, 4, "X") @ v.co) + Vector((0, 0, z))
+        b.add_bmesh(branch, wood, smooth=False)
+    return b.finish(name)
+
+
+def make_reeds(name, seed):
+    """Reeds and cattails for lake and sea shores (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    for i in range(16):
+        bm = bmesh.new()
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.35), math.sin(a) * rng.uniform(0, 0.35)
+        h = rng.uniform(0.9, 1.6)
+        w = 0.025
+        lean = Vector((math.cos(a), math.sin(a), 0)) * rng.uniform(0.05, 0.25)
+        side = Vector((math.cos(a + 1.57), math.sin(a + 1.57), 0)) * w
+        base = Vector((x, y, -0.1))
+        p0, p1 = bm.verts.new(base - side), bm.verts.new(base + side)
+        p2 = bm.verts.new(base + Vector((0, 0, h * 0.6)) + lean * 0.4 + side * 0.7)
+        p3 = bm.verts.new(base + Vector((0, 0, h * 0.6)) + lean * 0.4 - side * 0.7)
+        tip = bm.verts.new(base + Vector((0, 0, h)) + lean)
+        bm.faces.new((p0, p1, p2, p3))
+        bm.faces.new((p3, p2, tip))
+        b.add_bmesh(bm, lambda p, n: lerp(C["reed_dark"], C["reed"], p.z / 1.4), smooth=False)
+        if i % 4 == 0:
+            head = cylinder(6, 0.045, 0.045, 0.0, 0.22)
+            for v in head.verts:
+                v.co += base + Vector((0, 0, h * 0.8)) + lean * 0.75
+            b.add_bmesh(head, lambda p, n: C["cattail"], smooth=True)
+    return b.finish(name)
+
+
+def make_mushrooms(name, seed, cap_key):
+    """A little cluster of mushrooms."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(rng.randint(3, 5)):
+        a = rng.uniform(0, math.tau)
+        rr = rng.uniform(0.0, 0.25)
+        x, y = math.cos(a) * rr, math.sin(a) * rr
+        h = rng.uniform(0.08, 0.22)
+        stem = cylinder(6, 0.025, 0.02, -0.02, h)
+        for v in stem.verts:
+            v.co += Vector((x, y, 0))
+        b.add_bmesh(stem, lambda p, n: C["mushroom_stem"], smooth=True)
+        cap = blob(1, rng.uniform(0.06, 0.11), (x, y, h), rng, 0.1, 0.55)
+
+        def cap_color(p, n, x=x, y=y):
+            spot = math.sin(p.x * 90) * math.sin(p.y * 90) > 0.75 and cap_key == "mushroom_red"
+            return C["mushroom_stem"] if spot else lerp(C[cap_key], C["mushroom_stem"], max(0.0, -n.z))
+
+        b.add_bmesh(cap, cap_color, smooth=True)
+    return b.finish(name)
+
+
+def make_tall_grass(name, seed):
+    """Tall meadow grass, knee to waist high (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(18):
+        bm = bmesh.new()
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.4), math.sin(a) * rng.uniform(0, 0.4)
+        h = rng.uniform(0.6, 1.1)
+        w = rng.uniform(0.03, 0.05)
+        side = Vector((math.cos(a + 1.57), math.sin(a + 1.57), 0)) * w
+        lean = Vector((math.cos(a), math.sin(a), 0)) * rng.uniform(0.1, 0.35)
+        base = Vector((x, y, -0.05))
+        p0, p1 = bm.verts.new(base - side), bm.verts.new(base + side)
+        p2 = bm.verts.new(base + Vector((0, 0, h * 0.55)) + lean * 0.35 + side * 0.6)
+        p3 = bm.verts.new(base + Vector((0, 0, h * 0.55)) + lean * 0.35 - side * 0.6)
+        tip = bm.verts.new(base + Vector((0, 0, h)) + lean)
+        bm.faces.new((p0, p1, p2, p3))
+        bm.faces.new((p3, p2, tip))
+        b.add_bmesh(bm, lambda p, n: lerp(C["grass_dark"], C["tall_grass_tip"], p.z / 1.0), smooth=False)
+    return b.finish(name)
+
+
 # ---------------------------------------------------------------------------
 # Materials and scene
 # ---------------------------------------------------------------------------
@@ -427,33 +550,55 @@ def build_all():
     coll = fresh_collection()
     solid = vertex_color_material("OO_Props")
     two_sided = vertex_color_material("OO_Props_TwoSided", double_sided=True)
-    models = [
-        (make_pine("Pine", 8.0, 5, 2.4, False, 1), solid),
-        (make_pine("PineTall", 11.5, 7, 2.6, False, 2), solid),
-        (make_pine("PineSnowy", 8.5, 5, 2.5, True, 3), solid),
-        (make_round_tree("RoundTree", 6.5, 4), solid),
-        (make_bush("Bush", 1.6, 5), solid),
-        (make_rock("Rock", 1.4, 0.8, 6), solid),
-        (make_rock("RockFlat", 2.2, 0.45, 7), solid),
-        (make_rock("Boulder", 4.5, 0.75, 8), solid),
-        (make_grass("Grass", 9), two_sided),
-        (make_pine("Fir", 12.0, 8, 1.8, False, 10, ("fir_dark", "fir", "fir_tip")), solid),
-        (make_pine("FirSnowy", 11.0, 8, 1.9, True, 11, ("fir_dark", "fir", "fir_tip")), solid),
-        (make_birch("Birch", 9.0, 12), solid),
-        (make_log("Log", 5.0, 0.35, 13), solid),
-        (make_flowers("Flowers", 14), two_sided),
-        (make_rock("RockSnowy", 1.6, 0.75, 15, snowy=True), solid),
-        (make_fern("Fern", 16), two_sided),
-        (make_pebbles("Pebbles", 17), solid),
+    # Several versions of every model ("Pine", "Pine_2", "Pine_3", ...).
+    # Godot picks one at random for each tree, so the forest never repeats.
+    specs = [
+        ("Pine", lambda n, a: make_pine(n, a[0], a[1], a[2], False, a[3]),
+         solid, [(8.0, 5, 2.4, 1), (7.0, 4, 2.7, 41), (9.5, 6, 2.2, 42)]),
+        ("PineTall", lambda n, a: make_pine(n, a[0], a[1], a[2], False, a[3]),
+         solid, [(11.5, 7, 2.6, 2), (13.5, 8, 2.3, 43)]),
+        ("PineSnowy", lambda n, a: make_pine(n, a[0], a[1], a[2], True, a[3]),
+         solid, [(8.5, 5, 2.5, 3), (10.0, 6, 2.3, 44)]),
+        ("Fir", lambda n, a: make_pine(n, a[0], a[1], a[2], False, a[3], ("fir_dark", "fir", "fir_tip")),
+         solid, [(12.0, 8, 1.8, 10), (10.0, 7, 1.6, 45), (14.0, 9, 1.9, 46)]),
+        ("FirSnowy", lambda n, a: make_pine(n, a[0], a[1], a[2], True, a[3], ("fir_dark", "fir", "fir_tip")),
+         solid, [(11.0, 8, 1.9, 11), (9.0, 6, 1.7, 47)]),
+        ("Birch", lambda n, a: make_birch(n, a[0], a[1]), solid, [(9.0, 12), (8.0, 48), (10.5, 49)]),
+        ("RoundTree", lambda n, a: make_round_tree(n, a[0], a[1]), solid, [(6.5, 4), (5.5, 50), (7.5, 51)]),
+        ("Bush", lambda n, a: make_bush(n, a[0], a[1]), solid, [(1.6, 5), (1.2, 52), (2.0, 53)]),
+        ("Rock", lambda n, a: make_rock(n, a[0], a[1], a[2]), solid,
+         [(1.4, 0.8, 6), (1.2, 0.6, 54), (1.8, 0.9, 55), (1.0, 0.7, 56)]),
+        ("RockFlat", lambda n, a: make_rock(n, a[0], a[1], a[2]), solid, [(2.2, 0.45, 7), (2.6, 0.35, 57)]),
+        ("Boulder", lambda n, a: make_rock(n, a[0], a[1], a[2]), solid,
+         [(4.5, 0.75, 8), (3.8, 0.9, 58), (5.5, 0.6, 59)]),
+        ("RockSnowy", lambda n, a: make_rock(n, a[0], a[1], a[2], snowy=True), solid,
+         [(1.6, 0.75, 15), (2.2, 0.6, 60)]),
+        ("Grass", lambda n, a: make_grass(n, a[0]), two_sided, [(9,), (61,)]),
+        ("Flowers", lambda n, a: make_flowers(n, a[0]), two_sided, [(14,), (62,), (63,)]),
+        ("Fern", lambda n, a: make_fern(n, a[0]), two_sided, [(16,), (64,)]),
+        ("Pebbles", lambda n, a: make_pebbles(n, a[0]), solid, [(17,), (65,)]),
+        ("Log", lambda n, a: make_log(n, a[0], a[1], a[2]), solid, [(5.0, 0.35, 13), (6.5, 0.45, 66)]),
+        ("Stump", lambda n, a: make_stump(n, a[0]), solid, [(67,), (68,)]),
+        ("DeadTree", lambda n, a: make_dead_tree(n, a[0], a[1]), solid, [(7.0, 69), (9.0, 70)]),
+        ("Reeds", lambda n, a: make_reeds(n, a[0]), two_sided, [(71,), (72,)]),
+        ("Mushrooms", lambda n, a: make_mushrooms(n, a[0], a[1]), solid,
+         [(73, "mushroom_red"), (74, "mushroom_brown")]),
+        ("TallGrass", lambda n, a: make_tall_grass(n, a[0]), two_sided, [(75,), (76,)]),
     ]
+    built = []
+    for base, fn, mat, variants in specs:
+        for k, args in enumerate(variants):
+            name = base if k == 0 else "%s_%d" % (base, k + 1)
+            built.append((fn(name, args), mat))
+    models = built
     objects = []
     for i, (me, mat) in enumerate(models):
         me.materials.append(mat)
         me.color_attributes.active_color = me.color_attributes["Col"]
         obj = bpy.data.objects.new(me.name, me)
-        obj.location = (i * 6.0, 0, 0)
+        obj.location = ((i % 12) * 7.0, (i // 12) * 9.0, 0)
         coll.objects.link(obj)
-        if me.name.startswith("Rock") or me.name == "Boulder":
+        if me.name.startswith("Rock") or me.name.startswith("Boulder"):
             if hasattr(me, "set_sharp_from_angle"):
                 for p in me.polygons:
                     p.use_smooth = True

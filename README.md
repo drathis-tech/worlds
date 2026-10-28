@@ -4,9 +4,10 @@ Explorable planets for **Orbit Oafs**, a game about exploring space and finding 
 
 Each planet is full size: about **20 minutes to walk around** at 5 m/s. Ships
 can land, and players can walk, run, swim and climb. There are forests,
-meadows full of swaying grass and flowers, lakes, mountains to climb, snowy
-biomes and frozen polar seas, all softened by a blue-white haze in the
-distance. The ground is built inside
+meadows full of swaying grass and flowers, dirt trails winding all over,
+lakes with reeds, mountains of different styles to climb, snowy biomes and
+frozen polar seas, all softened by a blue-white haze in the distance. You can
+also fly straight up to space and back. The ground is built inside
 Godot while the game runs, with lots of detail near the player and less far
 away. That keeps a 1 km planet smooth and detailed without huge files. Change
 one number (the seed) and you get a different planet.
@@ -14,8 +15,12 @@ one number (the seed) and you get a different planet.
 | On the ground | From a hilltop |
 | --- | --- |
 | ![Standing in the grass](previews/ground.jpg) | ![Hazy view over the hills](previews/vista.jpg) |
-| **Flying low** | |
-| ![Flying over the hills](previews/low_flight.jpg) | |
+| **On a dirt trail** | **Trails from above** |
+| ![Walking a trail](previews/trail.jpg) | ![Trails winding over the hills](previews/trail_above.jpg) |
+| **In the forest** | **Flying low** |
+| ![Forest by a lake](previews/forest.jpg) | ![Flying over the hills](previews/low_flight.jpg) |
+| **Flown up to space** | |
+| ![The planet from space, with the on-screen info](previews/space_from_walker.jpg) | |
 | **Mountains** | **From orbit** |
 | ![Mountains by a lake](previews/mountain.jpg) | ![The whole planet](previews/orbit.jpg) |
 | **Snowy taiga** | **Frozen polar sea** |
@@ -43,6 +48,10 @@ graphics card. Forward+ on a real PC will look a bit nicer.
    - **WASD** to move, mouse to look, **Shift** to run, **Space** to jump.
    - **In water:** you float. **Space** swims up and **C** dives. Swim into the shore to climb out.
    - **Climbing:** walk into a steep rock face (steeper than about 52°) and you climb it.
+   - **Flying:** press **F**. Look where you want to go and hold **W**. **Space** goes up,
+     **C** goes down, and **Shift** is 4× faster. You speed up the higher you go, so
+     space is only a few seconds away. Press **F** again to walk.
+   - The info at the top of the screen shows what you're doing, your altitude and speed.
    - **Esc** frees the mouse.
 
 ## Put a planet in your game
@@ -113,8 +122,11 @@ The props are made by `blender/props_generator.py` and saved to
 1. Open Blender (4.2 or newer), go to the **Scripting** tab, open the script and press **Run Script**.
 2. Edit the models by hand if you like. Keep their names (`Pine`,
    `PineTall`, `PineSnowy`, `Fir`, `FirSnowy`, `Birch`, `RoundTree`, `Bush`,
-   `Log`, `Flowers`, `Fern`, `Pebbles`, `Rock`, `RockFlat`, `RockSnowy`,
-   `Boulder`, `Grass`), because Godot finds them by name.
+   `DeadTree`, `Log`, `Stump`, `Flowers`, `Fern`, `Reeds`, `Mushrooms`,
+   `TallGrass`, `Pebbles`, `Rock`, `RockFlat`, `RockSnowy`, `Boulder`, `Grass`),
+   because Godot finds them by name. Extra versions of a model are named with
+   a number on the end (`Pine_2`, `Pine_3`, ...). Godot picks one at random for
+   each prop, so you can add as many versions as you like.
 3. Export them as `props.glb` into `godot/planets/models/`.
 
 From the command line:
@@ -129,6 +141,7 @@ blender -b -P blender/props_generator.py -- --out godot/planets/models/props.glb
 godot --path godot -- --test-walk   # checks landing, walking and running
 godot --path godot -- --test-swim   # checks swimming to a shore and climbing out
 godot --path godot -- --test-climb  # checks climbing a steep rock face
+godot --path godot -- --test-fly    # flies up to space and back down
 godot --path godot -- --shots       # saves screenshots to Godot's user:// folder
 SHOTS=vista,ground godot --path godot -- --shots   # only some of the screenshots
 ```
@@ -140,9 +153,22 @@ SHOTS=vista,ground godot --path godot -- --shots   # only some of the screenshot
 | Earth-like (habitable) | ✅ Done |
 | Others (desert, ice, lava, gas giant, …) | Still to be decided. Each will be a new preset. |
 
+## How the planet avoids looking repetitive
+
+- **Props:** every tree, rock, bush and plant has 2–4 different models.
+  Each one placed also gets its own height, width, turn, slight lean (rocks
+  tilt and sink into the ground) and colour tint.
+- **Mountains:** each mountain region has its own style, from sharp and
+  ledged to round and smooth. Their shapes are bent by noise, with erosion
+  gullies down their sides, standalone peaks and rocky outcrops in meadows.
+- **Land:** some regions have stepped, terraced hills. Big areas each get
+  their own shade of green, and forests have bare earthy patches.
+- **Trails:** a network of winding dirt paths, with no trees or rocks on them,
+  tall grass along the edges and pebbles in the dirt.
+
 ## Good to know
 
-- Building the ground around the player at the start takes about 8 seconds on
+- Building the ground around the player at the start takes about 9 seconds on
   a 4-core computer. Show a loading screen until the `loaded` signal fires.
 - Trees and big rocks have collision. Grass, flowers, bushes and logs don't.
 - Water is the same height everywhere (sea level), including lakes. Anything

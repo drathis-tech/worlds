@@ -1,27 +1,38 @@
 class_name PlanetScatter
 extends RefCounted
-## Places trees, bushes, rocks, grass, flowers, ferns and pebbles near the focus.
-## make_data() runs on worker threads, build_node() on the main thread.
+## Places trees, bushes, rocks, logs, grass, flowers, ferns, reeds, mushrooms
+## and pebbles near the focus. make_data() runs on worker threads,
+## build_node() on the main thread.
+##
+## To stop things looking copy-pasted, every prop:
+##   - picks one of several model versions ("Pine", "Pine_2", "Pine_3", ...)
+##   - gets its own height, width and turn, rocks also a tilt
+##   - gets its own colour tint (lighter, darker, warmer, cooler), picked in
+##     the shader from where it stands
 
 var shape: PlanetShape
 var preset: PlanetPreset
 var planet_seed: int
 var draw_distance: float
-var meshes := {}   # model name -> Mesh
-var _materials := {}  # model name -> Material
+var variants := {}    # base model name -> Array[Mesh]
+var _materials := {}  # base model name -> Material
 
-# Small things (grass, flowers, ferns, pebbles) are numerous, so they are only
-# drawn close by and are split into small cells so only nearby cells draw.
+# Small things are numerous, so they are only drawn close by and are split
+# into cells so only nearby cells draw.
 # kind: [per square metre, fade start, fade end]
 const SMALL := {
 	"Grass": [1.1, 38.0, 52.0],
+	"TallGrass": [0.07, 45.0, 62.0],
 	"Flowers": [0.05, 45.0, 60.0],
 	"Fern": [0.09, 60.0, 80.0],
+	"Reeds": [0.25, 55.0, 75.0],
+	"Mushrooms": [0.025, 25.0, 35.0],
 	"Pebbles": [0.03, 45.0, 60.0],
 }
+const SWAYING := ["Grass", "TallGrass", "Flowers", "Fern", "Reeds"]
 const CELLS := 4            # small things: CELLS x CELLS groups per piece
 const LATTICE_M := 2.0      # spacing of the height grid used for small things
-const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush"]
+const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush", "DeadTree"]
 
 
 func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: PackedScene, p_draw_distance: float) -> void:
@@ -39,32 +50,50 @@ func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: Pac
 	still.shader = preload("shaders/props.gdshader")
 	var trees := still.duplicate()
 	trees.set_shader_parameter("sway", 0.012)
-	for kind in meshes:
+	for kind in variants:
 		_materials[kind] = trees if kind in TREES else still
-	for kind in ["Grass", "Flowers", "Fern"]:
+	for kind in SWAYING:
 		var m := ShaderMaterial.new()
 		m.shader = preload("shaders/foliage.gdshader")
 		m.set_shader_parameter("fade_start", SMALL[kind][1])
 		m.set_shader_parameter("fade_end", SMALL[kind][2])
-		m.set_shader_parameter("sway", 0.05 if kind == "Fern" else 0.12)
+		m.set_shader_parameter("sway", 0.05 if kind == "Fern" else (0.06 if kind == "TallGrass" else 0.12))
 		_materials[kind] = m
 
 
 func _collect_meshes(node: Node) -> void:
 	if node is MeshInstance3D and node.mesh != null:
-		meshes[String(node.name)] = node.mesh
+		var name := String(node.name)
+		# "Pine_2" is a second version of "Pine"
+		var base := name
+		var cut := name.rfind("_")
+		if cut > 0 and name.substr(cut + 1).is_valid_int():
+			base = name.substr(0, cut)
+		if not variants.has(base):
+			variants[base] = []
+		variants[base].append(node.mesh)
 	for c in node.get_children():
 		_collect_meshes(c)
 
 
 func has_props() -> bool:
-	return not meshes.is_empty()
+	return not variants.is_empty()
 
 
 static func basis_with_up(up: Vector3) -> Basis:
 	var helper := Vector3.FORWARD if absf(up.y) > 0.9 else Vector3.UP
 	var x := helper.cross(up).normalized()
 	return Basis(x, up, x.cross(up))
+
+
+## Adds one prop, as a random one of the model's versions.
+func _add(placed: Dictionary, kind: String, t: Transform3D, rng: RandomNumberGenerator, cell := -1) -> void:
+	var key := "%s|%d" % [kind, rng.randi() % variants[kind].size()]
+	if cell >= 0:
+		key += "#%d" % cell
+	if not placed.has(key):
+		placed[key] = []
+	placed[key].append(t)
 
 
 ## Works out what grows on one piece of ground. Worker thread.
@@ -74,25 +103,25 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 	var R := shape.radius
 	var width := size * R * PI * 0.25
 	var area := width * width
-	var snow := preset.snow_line * R
-	var placed := {}      # model name -> Array[Transform3D]
-	var colliders := []   # [Transform3D, radius, height] (height 0 = ball)
+	var placed := {}      # "kind|version" -> Array[Transform3D]
+	var colliders := []   # [origin, radius, height] (height 0 = ball)
 
 	var tree_max := maxf(preset.forest_density, preset.open_tree_density)
 	var tries := int(area * (tree_max + preset.rock_density))
 	for _i in tries:
 		var d := PlanetShape.cube_dir(face, a0 + rng.randf() * size, b0 + rng.randf() * size)
-		var h := shape.height(d)
-		if h < 1.2 or shape.in_landing_site(d):
-			continue
+		var sm := shape.sample(d)
+		var h := sm.x
+		if h < 1.2 or sm.z > 0.25 or shape.in_landing_site(d):
+			continue   # no trees or rocks in water, on trails or landing sites
 		var cold := shape.coldness(d)
 		var frozen_sea := shape.ice(d) > 0.3
 		var slope := _slope(d, h)
 		var snow_here := shape.snow_line_m(cold)
 		var kind := ""
 		var s := 1.0
-		if rng.randf() < preset.rock_density / (preset.rock_density + tree_max):
-			# Rocks and boulders
+		var is_rock := rng.randf() < preset.rock_density / (preset.rock_density + tree_max)
+		if is_rock:
 			if slope < 0.55:
 				continue
 			var r := rng.randf()
@@ -100,9 +129,8 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 				kind = "Boulder" if r < 0.12 else "RockSnowy"
 			else:
 				kind = "Boulder" if r < 0.15 else ("RockFlat" if r < 0.5 else "Rock")
-			s = rng.randf_range(0.6, 1.5)
+			s = rng.randf_range(0.5, 1.6)
 		else:
-			# Trees, bushes, logs and flowers, depending on the biome
 			if frozen_sea or slope < 0.86 or h > snow_here * 0.95:
 				continue
 			var f := shape.forest(d)
@@ -113,26 +141,36 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 				continue
 			var r := rng.randf()
 			if cold > 0.5 or h > snow_here * 0.6:
-				kind = "FirSnowy" if r < 0.55 else "PineSnowy"
+				kind = "FirSnowy" if r < 0.5 else ("PineSnowy" if r < 0.9 else "DeadTree")
 			elif cold > 0.2:
-				# taiga: dark firs and pines, a little snow
-				kind = "Fir" if r < 0.5 else ("PineSnowy" if r < 0.65 else ("Pine" if r < 0.92 else "Log"))
+				# taiga: dark firs and pines, a little snow, the odd dead tree
+				kind = "Fir" if r < 0.45 else ("PineSnowy" if r < 0.6 else ("Pine" if r < 0.85 else ("DeadTree" if r < 0.9 else ("Log" if r < 0.96 else "Stump"))))
 			elif f > 0.35:
-				# forest: mixed pines and birches, fallen logs
-				kind = "PineTall" if r < 0.3 else ("Pine" if r < 0.6 else ("Birch" if r < 0.85 else ("Log" if r < 0.93 else "Bush")))
+				# forest: mixed pines and birches, fallen logs and stumps
+				kind = "PineTall" if r < 0.28 else ("Pine" if r < 0.55 else ("Birch" if r < 0.8 else ("Log" if r < 0.87 else ("Stump" if r < 0.93 else "Bush"))))
 			else:
-				# meadow: round trees, birches, bushes and flowers
-				kind = "RoundTree" if r < 0.35 else ("Birch" if r < 0.55 else "Bush")
+				# meadow: round trees, birches and bushes
+				kind = "RoundTree" if r < 0.35 else ("Birch" if r < 0.55 else ("Bush" if r < 0.95 else "Stump"))
 			s = rng.randf_range(0.75, 1.3)
-		if not meshes.has(kind):
+		if not variants.has(kind):
 			continue
 		var up := d
-		var b := basis_with_up(up).rotated(up, rng.randf() * TAU).scaled(Vector3.ONE * s)
-		var t := Transform3D(b, d * (R + h) - d * 0.15)
-		if not placed.has(kind):
-			placed[kind] = []
-		placed[kind].append(t)
-		if kind.begins_with("Pine") or kind.begins_with("Fir") or kind == "RoundTree" or kind == "Birch":
+		var b := basis_with_up(up).rotated(up, rng.randf() * TAU)
+		var sink := 0.15
+		if is_rock:
+			# rocks lie at any angle, partly buried
+			var axis := b.x.rotated(up, rng.randf() * TAU)
+			b = b.rotated(axis, rng.randf_range(-0.45, 0.45))
+			b = b * Basis.from_scale(Vector3(s * rng.randf_range(0.8, 1.25), s * rng.randf_range(0.7, 1.2), s * rng.randf_range(0.8, 1.25)))
+			sink = s * 0.25
+		else:
+			# trees: their own height and width, a slight lean
+			b = b.rotated(b.x.rotated(up, rng.randf() * TAU), rng.randf_range(0.0, 0.06))
+			var wide := s * rng.randf_range(0.85, 1.15)
+			b = b * Basis.from_scale(Vector3(wide, s * rng.randf_range(0.85, 1.25), wide))
+		var t := Transform3D(b, d * (R + h) - d * sink)
+		_add(placed, kind, t, rng)
+		if kind in TREES and kind != "Bush":
 			colliders.append([t.origin + up * 2.0 * s, 0.35 * s, 4.0 * s])
 		elif kind == "Boulder" or ((kind == "Rock" or kind == "RockSnowy") and s > 1.0):
 			var size_m := (4.5 if kind == "Boulder" else 1.4) * s
@@ -143,8 +181,9 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 	return {"placed": placed, "colliders": colliders, "width": width}
 
 
-## Grass, flowers, ferns and pebbles. Uses a coarse height grid instead of
-## working out the exact height for every tuft, which keeps it fast.
+## Grass, tall grass, flowers, ferns, reeds, mushrooms and pebbles. Uses a
+## coarse height grid instead of working out the exact height for every tuft,
+## which keeps it fast.
 func _place_small(face: int, a0: float, b0: float, size: float, width: float, rng: RandomNumberGenerator, placed: Dictionary) -> void:
 	var R := shape.radius
 	var n := maxi(4, int(ceil(width / LATTICE_M))) + 1
@@ -152,23 +191,26 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 	var hs := PackedFloat32Array()
 	var colds := PackedFloat32Array()
 	var forests := PackedFloat32Array()
+	var trails := PackedFloat32Array()
 	hs.resize(n * n)
 	colds.resize(n * n)
 	forests.resize(n * n)
+	trails.resize(n * n)
 	for i in n:
 		for j in n:
 			var d := PlanetShape.cube_dir(face, a0 + size * i / (n - 1), b0 + size * j / (n - 1))
 			var k := i * n + j
-			hs[k] = shape.height(d)
+			var sm := shape.sample(d)
+			hs[k] = sm.x
+			trails[k] = sm.z
 			colds[k] = shape.coldness(d)
 			forests[k] = shape.forest(d)
 	var snow := preset.snow_line * R
 	var area := width * width
 
 	for kind in SMALL:
-		if not meshes.has(kind):
+		if not variants.has(kind):
 			continue
-		var cells := {}
 		for _t in int(area * SMALL[kind][0]):
 			var u := rng.randf()
 			var v := rng.randf()
@@ -182,32 +224,41 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 			var h := lerpf(lerpf(hs[k], hs[k + n], fu), lerpf(hs[k + 1], hs[k + n + 1], fu), fv)
 			var cold := colds[k]
 			var forest := forests[k]
+			var trail := trails[k]
 			var gx := (hs[k + n] - hs[k]) / cell
 			var gy := (hs[k + 1] - hs[k]) / cell
 			var slope := 1.0 / sqrt(1.0 + gx * gx + gy * gy)
 			var ok := false
 			match kind:
 				"Grass":
-					# thinner under trees, where ferns grow instead
+					# thinner under trees (ferns grow there) and on trails
 					ok = h > 1.2 and h < snow * 0.6 and cold < 0.42 and slope > 0.82 \
-							and rng.randf() < 1.0 - forest * 0.6
+							and rng.randf() < (1.0 - forest * 0.6) * (1.0 - trail * 0.9)
+				"TallGrass":
+					# at the edges of forests and along trails
+					ok = h > 1.5 and h < snow * 0.5 and cold < 0.35 and slope > 0.85 \
+							and ((forest > 0.12 and forest < 0.45) or (trail > 0.05 and trail < 0.3))
 				"Flowers":
-					ok = h > 1.5 and h < snow * 0.4 and cold < 0.25 and forest < 0.3 and slope > 0.88
+					ok = h > 1.5 and h < snow * 0.4 and cold < 0.25 and forest < 0.3 and slope > 0.88 and trail < 0.2
 				"Fern":
-					ok = h > 1.5 and h < shape.snow_line_m(cold) * 0.55 and forest > 0.45 and cold < 0.45 and slope > 0.8
+					ok = h > 1.5 and h < shape.snow_line_m(cold) * 0.55 and forest > 0.45 and cold < 0.45 \
+							and slope > 0.8 and trail < 0.3
+				"Reeds":
+					# right at the water's edge, some standing in the shallows
+					ok = h > -0.5 and h < 0.9 and cold < 0.4 and slope > 0.75
+				"Mushrooms":
+					ok = h > 1.5 and forest > 0.5 and cold < 0.45 and slope > 0.8 and trail < 0.2
 				"Pebbles":
 					var shore := h > 0.2 and h < 2.5
-					ok = cold < 0.6 and (shore or (slope > 0.5 and slope < 0.9)) and h > 0.2 and h < shape.snow_line_m(cold)
+					ok = cold < 0.6 and h > 0.2 and h < shape.snow_line_m(cold) \
+							and (shore or trail > 0.4 or (slope > 0.5 and slope < 0.9))
 			if not ok:
 				continue
 			var d := PlanetShape.cube_dir(face, a0 + u * size, b0 + v * size)
 			var sc := rng.randf_range(0.7, 1.4)
-			var b := basis_with_up(d).rotated(d, rng.randf() * TAU).scaled(Vector3.ONE * sc)
-			var key := "%s#%d" % [kind, int(u * CELLS) * CELLS + int(v * CELLS)]
-			if not cells.has(key):
-				cells[key] = []
-			cells[key].append(Transform3D(b, d * (R + h)))
-		placed.merge(cells)
+			var b := basis_with_up(d).rotated(d, rng.randf() * TAU)
+			b = b * Basis.from_scale(Vector3(sc, sc * rng.randf_range(0.7, 1.5), sc))
+			_add(placed, kind, Transform3D(b, d * (R + h)), rng, int(u * CELLS) * CELLS + int(v * CELLS))
 
 
 func _slope(d: Vector3, h: float) -> float:
@@ -228,14 +279,17 @@ func build_node(data: Dictionary) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = "Props"
 	var placed: Dictionary = data["placed"]
+	var cell_half := 0.5 * 1.42 * float(data.get("width", 100.0)) / CELLS
 	for key in placed:
 		var list: Array = placed[key]
 		if list.is_empty():
 			continue
-		var kind: String = String(key).get_slice("#", 0)
+		var kind_version: String = String(key).get_slice("#", 0)
+		var kind := kind_version.get_slice("|", 0)
+		var version := int(kind_version.get_slice("|", 1))
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = meshes[kind]
+		mm.mesh = variants[kind][version]
 		mm.instance_count = list.size()
 		for i in list.size():
 			mm.set_instance_transform(i, list[i])
@@ -244,7 +298,6 @@ func build_node(data: Dictionary) -> Node3D:
 		mmi.material_override = _materials[kind]
 		if SMALL.has(kind):
 			# cells are measured from their middle, so allow for their size
-			var cell_half := 0.5 * 1.42 * float(data.get("width", 100.0)) / CELLS
 			mmi.visibility_range_end = SMALL[kind][2] + cell_half
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		else:
