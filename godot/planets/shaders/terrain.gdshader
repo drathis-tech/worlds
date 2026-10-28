@@ -86,6 +86,9 @@ void fragment() {
 	float alpine = max(smoothstep(0.15, 0.45, v_cold), smoothstep(line0 * 0.35, line0 * 0.75, h));
 	grass = mix(grass, taiga_grass.rgb * 0.95, alpine * 0.8);
 	grass *= 0.93 + fine * 0.14;
+	// up close: clumps of lighter and darker grass
+	float clump = mix(0.5, vnoise(v_pos * 1.3) * 0.6 + vnoise(v_pos * 3.1) * 0.4, near);
+	grass *= 0.9 + clump * 0.2;
 
 	// Rock: horizontal layers that follow the ledges, broken up by noise.
 	float layers = sin(h * 0.45 + mid * 6.0 + big * 4.0) * 0.5 + 0.5;
@@ -131,10 +134,12 @@ void fragment() {
 		col = mix(sand.rgb, floor_col, smoothstep(0.0, 2.5, -h));
 	}
 
-	// Bumpy, chiselled rock surface: tilt the lighting normal with noise.
+	// Up close, tilt the lighting with noise: chiselled rock, lumpy ground.
 	float rock_amount = rock_t * (1.0 - snow_t) * step(0.0, h) * near;
-	if (rock_amount > 0.01) {
-		vec3 q = v_pos * 0.22;
+	float ground_amount = (1.0 - rock_t) * (1.0 - snow_t * 0.6) * step(0.3, h) * near;
+	float bump = rock_amount * 0.55 + ground_amount * 0.22;
+	if (bump > 0.01) {
+		vec3 q = v_pos * mix(0.9, 0.22, rock_t);
 		float e = 0.35;
 		float n0 = vnoise(q) + 0.5 * vnoise(q * 2.7);
 		vec3 grad = vec3(
@@ -142,7 +147,7 @@ void fragment() {
 			vnoise(q + vec3(0, e, 0)) + 0.5 * vnoise((q + vec3(0, e, 0)) * 2.7) - n0,
 			vnoise(q + vec3(0, 0, e)) + 0.5 * vnoise((q + vec3(0, 0, e)) * 2.7) - n0) / e;
 		grad -= n * dot(grad, n);
-		vec3 bumped = normalize(n - grad * 0.55 * rock_amount);
+		vec3 bumped = normalize(n - grad * bump);
 		NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(bumped, 0.0)).xyz);
 		col *= 1.0 - 0.12 * rock_amount * (1.0 - n0 / 1.5);
 	}

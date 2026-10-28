@@ -330,7 +330,8 @@ func _build(job: Dictionary) -> void:
 
 	# Skirts: short walls hanging down from each edge. They hide hairline
 	# gaps where a detailed piece meets a less detailed one.
-	var skirt := node_width_from_size(size) / n * 2.0 + 1.0
+	# (kept short, so they don't show through the see-through water from far away)
+	var skirt := minf(node_width_from_size(size) / n + 0.5, 6.0)
 	var edges := [[], [], [], []]
 	for t in n + 1:
 		edges[0].append(t)                       # i = 0

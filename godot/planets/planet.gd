@@ -33,8 +33,11 @@ signal loaded  ## The ground around the focus has finished loading.
 @export_group("Sky")
 ## Let this planet control the sky, sun haze and fog while the camera is near it.
 @export var control_sky: bool = true
-## Fog thickness on the ground. 0 = no fog.
-@export var fog_density: float = 0.0005
+## Haze: at this distance (metres) things on the ground are half hidden.
+## Smaller = hazier. 0 = no haze.
+@export var haze_distance: float = 230.0
+## Low clouds that drift around mountain tops.
+@export var low_clouds: bool = true
 
 var shape: PlanetShape
 var terrain: PlanetTerrain
@@ -193,6 +196,29 @@ func _add_clouds() -> void:
 			var b := PlanetScatter.basis_with_up(p)
 			b = b.scaled(Vector3(s * 1.2, s * 0.6, s))
 			transforms.append(Transform3D(b, p * (altitude + s * 0.2)))
+	if low_clouds:
+		# Smaller, lower clouds that cling to mountains, like in the reference.
+		var placed := 0
+		for _try in 4000:
+			if placed >= preset.cloud_count / 2:
+				break
+			var d := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
+			var ground := shape.height(d)
+			if ground < radius * preset.mountain_height * 0.35:
+				continue
+			placed += 1
+			var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
+			var along := t1.rotated(d, rng.randf() * TAU)
+			var across := d.cross(along)
+			var length := rng.randf_range(30.0, 90.0)
+			var alt := radius + ground + rng.randf_range(-15.0, 25.0)
+			for _p in int(length / 7.0) + rng.randi_range(2, 4):
+				var x := rng.randf_range(-1.0, 1.0)
+				var y := rng.randf_range(-0.3, 0.3) * (1.0 - absf(x))
+				var s := rng.randf_range(7.0, 16.0) * (1.0 - absf(x) * 0.5)
+				var p := (d * alt + along * x * length + across * y * length).normalized()
+				var b := PlanetScatter.basis_with_up(p).scaled(Vector3(s * 1.5, s * 0.5, s * 1.1))
+				transforms.append(Transform3D(b, p * (alt + s * 0.1)))
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = puff
@@ -268,11 +294,22 @@ func _setup_sky() -> void:
 	_environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	_environment.adjustment_enabled = true
 	_environment.adjustment_saturation = 1.0
-	_environment.adjustment_contrast = 1.04
-	_environment.fog_enabled = fog_density > 0.0
+	_environment.adjustment_contrast = 1.02
+	# Haze: far things fade into the sky colour, with a warm glow towards the sun.
+	_environment.fog_enabled = haze_distance > 0.0
+	_environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	_environment.fog_light_color = preset.horizon
+	_environment.fog_light_energy = 1.0
+	_environment.fog_sun_scatter = 0.25
 	_environment.fog_sky_affect = 0.0
-	_environment.fog_aerial_perspective = 0.0
+	_environment.fog_aerial_perspective = 0.4
+	# A soft glow around bright things (sun, snow, clouds).
+	_environment.glow_enabled = true
+	_environment.glow_intensity = 0.35
+	_environment.glow_strength = 1.0
+	_environment.glow_bloom = 0.04
+	_environment.glow_hdr_threshold = 0.95
+	_environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 
 
 func _find_world_environment(node: Node) -> WorldEnvironment:
@@ -306,5 +343,7 @@ func _process(delta: float) -> void:
 			_environment.fog_density = 0.09
 		else:
 			_environment.fog_light_color = preset.horizon
-			_environment.fog_density = fog_density * (1.0 - space)
+			# Thick near the ground, thinning out as you fly higher.
+			var base := 0.6931 / haze_distance if haze_distance > 0.0 else 0.0
+			_environment.fog_density = base * exp(-maxf(altitude, 0.0) / (radius * 0.35)) * (1.0 - space)
 		_environment.fog_enabled = _environment.fog_density > 0.0

@@ -4,14 +4,18 @@ Explorable planets for **Orbit Oafs**, a game about exploring space and finding 
 
 Each planet is full size: about **20 minutes to walk around** at 5 m/s. Ships
 can land, and players can walk, run, swim and climb. There are forests,
-meadows, lakes, mountains to climb, snowy biomes and frozen polar seas. The ground is built inside
+meadows full of swaying grass and flowers, lakes, mountains to climb, snowy
+biomes and frozen polar seas, all softened by a blue-white haze in the
+distance. The ground is built inside
 Godot while the game runs, with lots of detail near the player and less far
 away. That keeps a 1 km planet smooth and detailed without huge files. Change
 one number (the seed) and you get a different planet.
 
-| On the ground | Flying low |
+| On the ground | From a hilltop |
 | --- | --- |
-| ![Standing on a landing site](previews/ground.jpg) | ![Flying over forests](previews/low_flight.jpg) |
+| ![Standing in the grass](previews/ground.jpg) | ![Hazy view over the hills](previews/vista.jpg) |
+| **Flying low** | |
+| ![Flying over the hills](previews/low_flight.jpg) | |
 | **Mountains** | **From orbit** |
 | ![Mountains by a lake](previews/mountain.jpg) | ![The whole planet](previews/orbit.jpg) |
 | **Snowy taiga** | **Frozen polar sea** |
@@ -88,11 +92,18 @@ Godot to change:
 To make a new planet type, duplicate that file, change it, and set it as the
 planet's **Preset**.
 
-Detail settings on the Planet node:
+Settings on the Planet node:
 
 - **Ground Detail**: how fine the ground is near the focus. 6 gives about 0.8 m.
 - **Detail Distance**: how far out the detailed ground reaches.
 - **Prop Draw Distance**: how far away trees and rocks are drawn.
+- **Haze Distance**: how hazy the air is. At this distance things are half
+  hidden. Smaller is hazier, and 0 turns haze off. It thins out as you fly higher.
+- **Low Clouds**: small clouds that drift around mountain tops.
+
+Grass, flowers, ferns and pebbles are only drawn close by: grass to about 50 m,
+ferns to 80 m. They fade in smoothly instead of popping. You can change those
+distances and densities at the top of `planets/planet_scatter.gd` (`SMALL`).
 
 ## Trees, rocks and grass (Blender)
 
@@ -102,7 +113,7 @@ The props are made by `blender/props_generator.py` and saved to
 1. Open Blender (4.2 or newer), go to the **Scripting** tab, open the script and press **Run Script**.
 2. Edit the models by hand if you like. Keep their names (`Pine`,
    `PineTall`, `PineSnowy`, `Fir`, `FirSnowy`, `Birch`, `RoundTree`, `Bush`,
-   `Log`, `Flowers`, `Rock`, `RockFlat`, `RockSnowy`,
+   `Log`, `Flowers`, `Fern`, `Pebbles`, `Rock`, `RockFlat`, `RockSnowy`,
    `Boulder`, `Grass`), because Godot finds them by name.
 3. Export them as `props.glb` into `godot/planets/models/`.
 
@@ -119,6 +130,7 @@ godot --path godot -- --test-walk   # checks landing, walking and running
 godot --path godot -- --test-swim   # checks swimming to a shore and climbing out
 godot --path godot -- --test-climb  # checks climbing a steep rock face
 godot --path godot -- --shots       # saves screenshots to Godot's user:// folder
+SHOTS=vista,ground godot --path godot -- --shots   # only some of the screenshots
 ```
 
 ## Planet types

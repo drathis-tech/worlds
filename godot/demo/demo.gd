@@ -118,13 +118,15 @@ func _test_climb() -> void:
 		await get_tree().physics_frame
 	var top := h0
 	var reached_top_at := -1
-	for i in 12:
-		await get_tree().create_timer(1.0).timeout
+	var t_start := Time.get_ticks_msec()
+	for i in 12 * 60:
+		await get_tree().physics_frame
 		climbed_any = climbed_any or walker.climbing
-		top = maxf(top, planet.altitude_of(walker.global_position))
+		var alt := planet.altitude_of(walker.global_position)
+		top = maxf(top, alt)
 		# made it up: standing again after climbing, at least 4 m higher
-		if climbed_any and walker.is_on_floor() and top - h0 > 4.0:
-			reached_top_at = i + 1
+		if climbed_any and walker.is_on_floor() and alt - h0 > 4.0:
+			reached_top_at = ceili((Time.get_ticks_msec() - t_start) / 1000.0)
 			break
 	_press(KEY_W, false)
 	if reached_top_at > 0:
@@ -231,7 +233,22 @@ func _take_shots() -> void:
 		var dir := (land - icy)
 		dir = (dir - iu * dir.dot(iu)).normalized()
 		shots.append(["ice", icy + iu * 6.0 - dir * 20.0, land + iu * 10.0])
+	# From the top of the highest nearby hill, looking out over the land.
+	var best_top := p
+	var best_dir := toward
+	for k in 24:
+		var dir2 := toward.rotated(up, k * TAU / 24.0)
+		for step in range(1, 13):
+			var q := _ground(p + dir2 * step * 45.0)
+			if planet.altitude_of(q) > planet.altitude_of(best_top):
+				best_top = q
+				best_dir = dir2
+	var tu := planet.up_at(best_top)
+	shots.insert(1, ["vista", best_top + tu * 12.0 - best_dir * 5.0, _ground(best_top + best_dir * 350.0) + tu * 20.0])
 	shots.append(["orbit_pole", Vector3(0.35, 1.0, 0.6).normalized() * R * 2.9, Vector3.ZERO])
+	var only := OS.get_environment("SHOTS")
+	if only != "":
+		shots = shots.filter(func(sh): return sh[0] in only.split(","))
 	for shot in shots:
 		var eye: Vector3 = shot[1]
 		var target: Vector3 = shot[2]

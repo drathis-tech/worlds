@@ -18,7 +18,8 @@ float hash(vec3 p) {
 void sky() {
 	vec3 dir = normalize(EYEDIR);
 	float y = dot(dir, normalize(planet_up));
-	vec3 day = mix(horizon_color.rgb, sky_color.rgb, smoothstep(-0.02, 0.5, y));
+	// a wide, soft band of haze along the horizon
+	vec3 day = mix(horizon_color.rgb, sky_color.rgb, pow(smoothstep(-0.04, 0.7, y), 0.8));
 	day = mix(day, horizon_color.rgb * 0.92, smoothstep(0.0, -0.3, y));
 
 	// Stars: tiny bright cells, only visible in space.

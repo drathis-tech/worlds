@@ -138,7 +138,9 @@ func mountain_mask(d: Vector3, land_t: float) -> float:
 func coldness(d: Vector3) -> float:
 	var lat := absf(d.y)   # 0 at the equator, 1 at the poles
 	var wobble := _cold_edge.get_noise_3dv(d) * 0.06
-	var polar := smoothstep(preset.polar_cap - 0.1, preset.polar_cap + 0.05, lat + wobble)
+	# the edge of the polar cap wanders a lot, so it isn't a straight line
+	var big_wobble := _region.get_noise_3dv(d * 1.3 + Vector3(17.0, 3.0, -9.0)) * 0.16
+	var polar := smoothstep(preset.polar_cap - 0.1, preset.polar_cap + 0.05, lat + wobble + big_wobble)
 	var cold := 0.0
 	if preset.snowy_biomes > 0.0:
 		var b := _biome.get_noise_3dv(d) * 0.5 + 0.5 + wobble

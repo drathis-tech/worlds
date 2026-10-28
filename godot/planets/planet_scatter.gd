@@ -1,6 +1,6 @@
 class_name PlanetScatter
 extends RefCounted
-## Places trees, bushes, rocks and grass on the ground near the focus.
+## Places trees, bushes, rocks, grass, flowers, ferns and pebbles near the focus.
 ## make_data() runs on worker threads, build_node() on the main thread.
 
 var shape: PlanetShape
@@ -8,12 +8,20 @@ var preset: PlanetPreset
 var planet_seed: int
 var draw_distance: float
 var meshes := {}   # model name -> Mesh
-var _solid: StandardMaterial3D
-var _two_sided: StandardMaterial3D
+var _materials := {}  # model name -> Material
 
-# Grass is only drawn close by; it's the most numerous thing.
-const GRASS_DISTANCE := 70.0
-const GRASS_DENSITY := 0.35   # tufts per square metre on open grass
+# Small things (grass, flowers, ferns, pebbles) are numerous, so they are only
+# drawn close by and are split into small cells so only nearby cells draw.
+# kind: [per square metre, fade start, fade end]
+const SMALL := {
+	"Grass": [1.1, 38.0, 52.0],
+	"Flowers": [0.05, 45.0, 60.0],
+	"Fern": [0.09, 60.0, 80.0],
+	"Pebbles": [0.03, 45.0, 60.0],
+}
+const CELLS := 4            # small things: CELLS x CELLS groups per piece
+const LATTICE_M := 2.0      # spacing of the height grid used for small things
+const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush"]
 
 
 func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: PackedScene, p_draw_distance: float) -> void:
@@ -27,12 +35,19 @@ func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: Pac
 	_collect_meshes(root)
 	root.free()
 	# The models keep their colours in the mesh ("vertex colours").
-	_solid = StandardMaterial3D.new()
-	_solid.vertex_color_use_as_albedo = true
-	_solid.roughness = 0.9
-	_solid.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
-	_two_sided = _solid.duplicate()
-	_two_sided.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var still := ShaderMaterial.new()
+	still.shader = preload("shaders/props.gdshader")
+	var trees := still.duplicate()
+	trees.set_shader_parameter("sway", 0.012)
+	for kind in meshes:
+		_materials[kind] = trees if kind in TREES else still
+	for kind in ["Grass", "Flowers", "Fern"]:
+		var m := ShaderMaterial.new()
+		m.shader = preload("shaders/foliage.gdshader")
+		m.set_shader_parameter("fade_start", SMALL[kind][1])
+		m.set_shader_parameter("fade_end", SMALL[kind][2])
+		m.set_shader_parameter("sway", 0.05 if kind == "Fern" else 0.12)
+		_materials[kind] = m
 
 
 func _collect_meshes(node: Node) -> void:
@@ -107,7 +122,7 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 				kind = "PineTall" if r < 0.3 else ("Pine" if r < 0.6 else ("Birch" if r < 0.85 else ("Log" if r < 0.93 else "Bush")))
 			else:
 				# meadow: round trees, birches, bushes and flowers
-				kind = "RoundTree" if r < 0.3 else ("Birch" if r < 0.45 else ("Bush" if r < 0.7 else "Flowers"))
+				kind = "RoundTree" if r < 0.35 else ("Birch" if r < 0.55 else "Bush")
 			s = rng.randf_range(0.75, 1.3)
 		if not meshes.has(kind):
 			continue
@@ -123,30 +138,76 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 			var size_m := (4.5 if kind == "Boulder" else 1.4) * s
 			colliders.append([t.origin + up * size_m * 0.2, size_m * 0.42, 0.0])
 
-	# Grass tufts and wild flowers on gentle, low, open, warm ground.
-	if meshes.has("Grass"):
-		var grass := []
-		var flowers := []
-		var tufts := int(area * GRASS_DENSITY)
-		for _i in tufts:
-			var d := PlanetShape.cube_dir(face, a0 + rng.randf() * size, b0 + rng.randf() * size)
-			var h := shape.height(d)
-			if h < 1.5 or h > snow * 0.6 or shape.in_landing_site(d):
-				continue
-			if shape.coldness(d) > 0.42 or _slope(d, h) < 0.88:
-				continue
-			var b := basis_with_up(d).rotated(d, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.7, 1.4))
-			if meshes.has("Flowers") and rng.randf() < 0.04 and shape.forest(d) < 0.3:
-				flowers.append(Transform3D(b, d * (R + h)))
-			else:
-				grass.append(Transform3D(b, d * (R + h)))
-		placed["Grass"] = grass
-		if not flowers.is_empty():
-			if not placed.has("Flowers"):
-				placed["Flowers"] = []
-			placed["Flowers"].append_array(flowers)
+	_place_small(face, a0, b0, size, width, rng, placed)
 
-	return {"placed": placed, "colliders": colliders}
+	return {"placed": placed, "colliders": colliders, "width": width}
+
+
+## Grass, flowers, ferns and pebbles. Uses a coarse height grid instead of
+## working out the exact height for every tuft, which keeps it fast.
+func _place_small(face: int, a0: float, b0: float, size: float, width: float, rng: RandomNumberGenerator, placed: Dictionary) -> void:
+	var R := shape.radius
+	var n := maxi(4, int(ceil(width / LATTICE_M))) + 1
+	var cell := width / (n - 1)
+	var hs := PackedFloat32Array()
+	var colds := PackedFloat32Array()
+	var forests := PackedFloat32Array()
+	hs.resize(n * n)
+	colds.resize(n * n)
+	forests.resize(n * n)
+	for i in n:
+		for j in n:
+			var d := PlanetShape.cube_dir(face, a0 + size * i / (n - 1), b0 + size * j / (n - 1))
+			var k := i * n + j
+			hs[k] = shape.height(d)
+			colds[k] = shape.coldness(d)
+			forests[k] = shape.forest(d)
+	var snow := preset.snow_line * R
+	var area := width * width
+
+	for kind in SMALL:
+		if not meshes.has(kind):
+			continue
+		var cells := {}
+		for _t in int(area * SMALL[kind][0]):
+			var u := rng.randf()
+			var v := rng.randf()
+			var gu := u * (n - 1)
+			var gv := v * (n - 1)
+			var i := mini(int(gu), n - 2)
+			var j := mini(int(gv), n - 2)
+			var fu := gu - i
+			var fv := gv - j
+			var k := i * n + j
+			var h := lerpf(lerpf(hs[k], hs[k + n], fu), lerpf(hs[k + 1], hs[k + n + 1], fu), fv)
+			var cold := colds[k]
+			var forest := forests[k]
+			var gx := (hs[k + n] - hs[k]) / cell
+			var gy := (hs[k + 1] - hs[k]) / cell
+			var slope := 1.0 / sqrt(1.0 + gx * gx + gy * gy)
+			var ok := false
+			match kind:
+				"Grass":
+					# thinner under trees, where ferns grow instead
+					ok = h > 1.2 and h < snow * 0.6 and cold < 0.42 and slope > 0.82 \
+							and rng.randf() < 1.0 - forest * 0.6
+				"Flowers":
+					ok = h > 1.5 and h < snow * 0.4 and cold < 0.25 and forest < 0.3 and slope > 0.88
+				"Fern":
+					ok = h > 1.5 and h < shape.snow_line_m(cold) * 0.55 and forest > 0.45 and cold < 0.45 and slope > 0.8
+				"Pebbles":
+					var shore := h > 0.2 and h < 2.5
+					ok = cold < 0.6 and (shore or (slope > 0.5 and slope < 0.9)) and h > 0.2 and h < shape.snow_line_m(cold)
+			if not ok:
+				continue
+			var d := PlanetShape.cube_dir(face, a0 + u * size, b0 + v * size)
+			var sc := rng.randf_range(0.7, 1.4)
+			var b := basis_with_up(d).rotated(d, rng.randf() * TAU).scaled(Vector3.ONE * sc)
+			var key := "%s#%d" % [kind, int(u * CELLS) * CELLS + int(v * CELLS)]
+			if not cells.has(key):
+				cells[key] = []
+			cells[key].append(Transform3D(b, d * (R + h)))
+		placed.merge(cells)
 
 
 func _slope(d: Vector3, h: float) -> float:
@@ -167,10 +228,11 @@ func build_node(data: Dictionary) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = "Props"
 	var placed: Dictionary = data["placed"]
-	for kind in placed:
-		var list: Array = placed[kind]
+	for key in placed:
+		var list: Array = placed[key]
 		if list.is_empty():
 			continue
+		var kind: String = String(key).get_slice("#", 0)
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.mesh = meshes[kind]
@@ -179,13 +241,15 @@ func build_node(data: Dictionary) -> Node3D:
 			mm.set_instance_transform(i, list[i])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
-		var small: bool = kind == "Grass" or kind == "Flowers"
-		mmi.material_override = _two_sided if small else _solid
-		var dist := GRASS_DISTANCE if small else draw_distance
-		mmi.visibility_range_end = dist
-		mmi.visibility_range_end_margin = dist * 0.1
-		if small:
+		mmi.material_override = _materials[kind]
+		if SMALL.has(kind):
+			# cells are measured from their middle, so allow for their size
+			var cell_half := 0.5 * 1.42 * float(data.get("width", 100.0)) / CELLS
+			mmi.visibility_range_end = SMALL[kind][2] + cell_half
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		else:
+			mmi.visibility_range_end = draw_distance
+			mmi.visibility_range_end_margin = draw_distance * 0.1
 		holder.add_child(mmi)
 
 	var colliders: Array = data["colliders"]

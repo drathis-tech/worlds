@@ -75,6 +75,8 @@ C = {k: hex_color(v) for k, v in {
     "flower_white": "#fafafa",
     "flower_pink": "#f48fb8",
     "flower_purple": "#a77be0",
+    "fern_dark": "#2f7a34",
+    "fern": "#6cbf48",
 }.items()}
 
 
@@ -321,10 +323,10 @@ def make_grass(name, seed):
     """A tuft of grass blades (shown from both sides)."""
     rng = random.Random(seed)
     b = Builder()
-    for _ in range(9):
+    for _ in range(14):
         bm = bmesh.new()
         a = rng.uniform(0, math.tau)
-        x, y = math.cos(a) * rng.uniform(0, 0.18), math.sin(a) * rng.uniform(0, 0.18)
+        x, y = math.cos(a) * rng.uniform(0, 0.28), math.sin(a) * rng.uniform(0, 0.28)
         h = rng.uniform(0.35, 0.65)
         w = rng.uniform(0.05, 0.08)
         side = Vector((math.cos(a + 1.57), math.sin(a + 1.57), 0)) * w
@@ -337,6 +339,56 @@ def make_grass(name, seed):
         bm.faces.new((p0, p1, p2, p3))
         bm.faces.new((p3, p2, tip))
         b.add_bmesh(bm, lambda p, n: lerp(C["grass_dark"], C["grass_tip"], p.z / 0.6))
+    return b.finish(name)
+
+
+def make_fern(name, seed):
+    """A forest-floor fern: arching fronds with small leaflets (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    for f in range(7):
+        a = f / 7 * math.tau + rng.uniform(-0.2, 0.2)
+        length = rng.uniform(0.6, 0.95)
+        out = Vector((math.cos(a), math.sin(a), 0))
+        side = Vector((-out.y, out.x, 0))
+        bm = bmesh.new()
+        steps = 6
+        left, right, mid = [], [], []
+        for k in range(steps + 1):
+            t = k / steps
+            # rises then droops, like a real frond
+            pos = out * (length * t) + Vector((0, 0, 0.55 * math.sin(t * 2.6) * length))
+            w = 0.13 * math.sin(math.pi * min(1.0, t * 1.15)) * length
+            mid.append(bm.verts.new(pos))
+            left.append(bm.verts.new(pos + side * w - Vector((0, 0, w * 0.4))))
+            right.append(bm.verts.new(pos - side * w - Vector((0, 0, w * 0.4))))
+        for k in range(steps):
+            bm.faces.new((mid[k], left[k], left[k + 1], mid[k + 1]))
+            bm.faces.new((mid[k], mid[k + 1], right[k + 1], right[k]))
+
+        def color(p, n, length=length):
+            t = min(1.0, Vector((p.x, p.y)).length / length)
+            return lerp(C["fern_dark"], C["fern"], t)
+
+        b.add_bmesh(bm, color, smooth=True)
+    return b.finish(name)
+
+
+def make_pebbles(name, seed):
+    """A little cluster of stones."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(6):
+        a = rng.uniform(0, math.tau)
+        rr = rng.uniform(0.0, 0.45)
+        r = rng.uniform(0.06, 0.16)
+        stone = blob(1, r, (math.cos(a) * rr, math.sin(a) * rr, r * 0.25), rng, 0.25, 0.55)
+
+        def color(p, n, shade=rng.uniform(0.85, 1.1)):
+            c = lerp(C["rock_dark"], C["rock_light"], 0.4 + n.z * 0.5)
+            return (c[0] * shade, c[1] * shade, c[2] * shade, 1.0)
+
+        b.add_bmesh(stone, color, smooth=False)
     return b.finish(name)
 
 
@@ -391,6 +443,8 @@ def build_all():
         (make_log("Log", 5.0, 0.35, 13), solid),
         (make_flowers("Flowers", 14), two_sided),
         (make_rock("RockSnowy", 1.6, 0.75, 15, snowy=True), solid),
+        (make_fern("Fern", 16), two_sided),
+        (make_pebbles("Pebbles", 17), solid),
     ]
     objects = []
     for i, (me, mat) in enumerate(models):
