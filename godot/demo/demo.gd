@@ -132,14 +132,15 @@ func _test_swim() -> void:
 	var walker: PlanetWalker = $Walker
 	await planet.loaded
 	# a place where land drops into water at least 3 m deep
-	var found := _search(func(a, b): return a > 0.5 and b < -3.0, 2500.0)
+	# where the land meets the water, and the water gets at least 2 m deep 30 m out
+	var found := _search(func(a, b): return a > 0.0 and b <= 0.0, 2500.0)
 	if found.is_empty():
 		print("Swim test: no shore found nearby")
 		get_tree().quit()
 		return
 	var shore: Vector3 = found[0]
 	var dir: Vector3 = found[1]
-	var start := _ground(shore + dir * 14.0)
+	var start := _ground(shore + dir * 30.0)
 	start = planet.to_global(planet.to_local(start).normalized() * planet.radius)  # water surface
 	await _teleport(walker, start, -dir)
 	await get_tree().create_timer(2.0).timeout
