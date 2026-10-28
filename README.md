@@ -2,14 +2,17 @@
 
 Explorable planets for **Orbit Oafs**, a game about exploring space and finding habitable planets.
 
-Each planet is full size: about **20 minutes to walk around** at 5 m/s. Ships
+Each planet is full size: about **20 minutes to run around** (12 m/s), or
+about 48 minutes at walking pace. Ships
 can land, and players can walk, run, swim and climb. There are forests,
-meadows full of swaying grass and flowers, dirt trails winding all over,
-lakes with reeds, mountains of different styles to climb, snowy biomes and
-frozen polar seas, all softened by a blue-white haze in the distance. You can
+meadows full of swaying grass and flowers, golden grass patches, autumn
+larches and red bushes, dirt trails winding all over, lakes with reeds and
+foamy shores, gentle mountains with sandstone rock formations, snowy biomes
+and frozen polar seas, all in warm golden-hour light with coloured haze in
+the distance. You can
 also fly straight up to space and back. The ground is built inside
 Godot while the game runs, with lots of detail near the player and less far
-away. That keeps a 1 km planet smooth and detailed without huge files. Change
+away. That keeps a 2.3 km planet smooth and detailed without huge files. Change
 one number (the seed) and you get a different planet.
 
 | On the ground | From a hilltop |
@@ -95,7 +98,9 @@ godot --path godot res://demo/city_demo.tscn -- --shots       # screenshots
 2. Add a **Node3D** to your scene and attach `planets/planet.gd`. It becomes a `Planet`.
 3. In the Inspector:
    - **Planet Seed**: any number. Each one gives a different planet.
-   - **Radius**: 1000 m by default, which is about 20 minutes to walk around.
+   - **Radius**: 2300 m by default, which is about 20 minutes to run around.
+   - **Lighting**: the mood. `golden_hour` (default), `pink_dusk` or `day`, in
+     `planets/presets/`. It sets the sun, sky, blue shadows, haze and colour grading.
    - **Focus**: your player or ship. The ground near it gets the most detail
      and the collision. If you leave it empty, the active camera is used.
    - **Start At Landing Site** (optional): something to place on a landing site at the start.
@@ -138,11 +143,12 @@ planet's **Preset**.
 
 Settings on the Planet node:
 
-- **Ground Detail**: how fine the ground is near the focus. 6 gives about 0.8 m.
+- **Ground Detail**: how fine the ground is near the focus. 7 gives about 0.9 m.
 - **Detail Distance**: how far out the detailed ground reaches.
 - **Prop Draw Distance**: how far away trees and rocks are drawn.
-- **Haze Distance**: how hazy the air is. At this distance things are half
-  hidden. Smaller is hazier, and 0 turns haze off. It thins out as you fly higher.
+- **Rock Formations**: how many big sandstone rock piles are scattered over
+  the mountains. Each pile is a random stack of five rock shapes.
+- Haze colour and thickness are part of the **Lighting** preset.
 - **Low Clouds**: small clouds that drift around mountain tops.
 
 Grass, flowers, ferns and pebbles are only drawn close by: grass to about 50 m,
@@ -158,7 +164,10 @@ The props are made by `blender/props_generator.py` and saved to
 2. Edit the models by hand if you like. Keep their names (`Pine`,
    `PineTall`, `PineSnowy`, `Fir`, `FirSnowy`, `Birch`, `RoundTree`, `Bush`,
    `DeadTree`, `Log`, `Stump`, `Flowers`, `Fern`, `Reeds`, `Mushrooms`,
-   `TallGrass`, `Pebbles`, `Rock`, `RockFlat`, `RockSnowy`, `Boulder`, `Grass`),
+   `TallGrass`, `GrassClump`, `GrassShort`, `LeafyBush`, `WhiteFlowers`, `Larch`,
+   `AutumnTree`, `AutumnBush`, `Pebbles`, `Rock`, `RockFlat`, `RockSnowy`, `Boulder`,
+   `Grass`, and the five rock-formation pieces `CliffSlab`, `CliffBlock`,
+   `CliffPillar`, `CliffRound`, `CliffWedge`),
    because Godot finds them by name. Extra versions of a model are named with
    a number on the end (`Pine_2`, `Pine_3`, ...). Godot picks one at random for
    each prop, so you can add as many versions as you like.
@@ -203,7 +212,7 @@ SHOTS=vista,ground godot --path godot -- --shots   # only some of the screenshot
 
 ## Good to know
 
-- Building the ground around the player at the start takes about 9 seconds on
+- Building the ground around the player at the start takes about 15 seconds on
   a 4-core computer. Show a loading screen until the `loaded` signal fires.
 - Trees and big rocks have collision. Grass, flowers, bushes and logs don't.
 - Water is the same height everywhere (sea level), including lakes. Anything

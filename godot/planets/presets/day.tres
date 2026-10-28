@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="PlanetLighting" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://planets/planet_lighting.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+sun_color = Color(1, 0.96, 0.88, 1)
+sun_energy = 1.4
+sun_elevation = 50.0
+shadow_color = Color(0.5, 0.6, 0.85, 1)
+shadow_energy = 0.7
+sky_top = Color(0.38, 0.65, 0.95, 1)
+horizon_sun = Color(0.85, 0.93, 1, 1)
+horizon_away = Color(0.78, 0.88, 0.98, 1)
+sun_glow = Color(1, 0.95, 0.85, 1)
+haze_color = Color(0.78, 0.86, 0.96, 1)
+haze_distance = 420.0
+saturation = 1.08

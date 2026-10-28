@@ -11,8 +11,8 @@ signal loaded  ## The ground around the focus has finished loading.
 @export var preset: PlanetPreset = preload("presets/earthlike.tres")
 ## Different number = different planet.
 @export var planet_seed: int = 7
-## Radius in metres. 1000 m = about 20 minutes to walk around at 5 m/s.
-@export var radius: float = 1000.0
+## Radius in metres. 2300 m = about 20 minutes to run around (48 minutes walking).
+@export var radius: float = 2300.0
 ## Gets the most ground detail. Empty = the active camera.
 @export var focus: Node3D
 ## Gravity at ground level, in m/s². Earth is 9.8.
@@ -21,21 +21,26 @@ signal loaded  ## The ground around the focus has finished loading.
 @export var start_at_landing_site: Node3D
 
 @export_group("Detail")
-## How finely the ground near the focus is built. 6 = about 0.8 m on a 1 km planet.
-@export_range(3, 8) var ground_detail: int = 6
+## How finely the ground near the focus is built. 7 = about 0.9 m on a 2.3 km planet.
+@export_range(3, 9) var ground_detail: int = 7
 ## Higher = detailed ground reaches further out (slower).
 @export_range(1.5, 4.0) var detail_distance: float = 2.2
 ## Trees, bushes and rocks.
 @export var props: PackedScene = preload("models/props.glb")
 ## Props further away than this are hidden.
 @export var prop_draw_distance: float = 380.0
+## How many places are tried for big rock formations (per 1 km of radius squared).
+@export var rock_formations: int = 12000
 
 @export_group("Sky")
-## Let this planet control the sky, sun haze and fog while the camera is near it.
+## Let this planet control the sky, sun, shadows and haze while the camera is near it.
 @export var control_sky: bool = true
-## Haze: at this distance (metres) things on the ground are half hidden.
-## Smaller = hazier. 0 = no haze.
-@export var haze_distance: float = 230.0
+## The lighting mood: golden_hour, pink_dusk or day (in presets/).
+@export var lighting: PlanetLighting = preload("presets/golden_hour.tres")
+## The sun. Empty = the first DirectionalLight3D in the scene.
+@export var sun: DirectionalLight3D
+## Turn the sun so it sits at the lighting's height over the first landing site.
+@export var aim_sun_at_start: bool = true
 ## Low clouds that drift around mountain tops.
 @export var low_clouds: bool = true
 
@@ -77,8 +82,10 @@ func _ready() -> void:
 	_add_clouds()
 	_add_gravity()
 	_add_landing_sites(sites)
+	_add_rock_formations()
 	if control_sky:
 		_setup_sky()
+		_setup_sun()
 	if start_at_landing_site != null:
 		# Put it on the site now, so the ground there loads first, and hold it
 		# still until there is ground to stand on.
@@ -142,7 +149,7 @@ func _add_ocean() -> void:
 	var m := ShaderMaterial.new()
 	m.shader = preload("shaders/water.gdshader")
 	m.set_shader_parameter("water_color", preset.water)
-	m.set_shader_parameter("rim_color", preset.horizon)
+	m.set_shader_parameter("rim_color", lighting.horizon_sun.lerp(lighting.sky_top, 0.3))
 	_ocean = MeshInstance3D.new()
 	_ocean.name = "Ocean"
 	_ocean.mesh = sphere
@@ -180,7 +187,7 @@ func _add_clouds() -> void:
 	puff.rings = 10
 	var transforms: Array[Transform3D] = []
 	var altitude := radius * (1.0 + preset.mountain_height) + 60.0
-	for _c in preset.cloud_count:
+	for _c in int(preset.cloud_count * pow(radius / 1000.0, 2.0)):
 		var d := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
 		var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
 		var t2 := d.cross(t1)
@@ -200,8 +207,8 @@ func _add_clouds() -> void:
 	if low_clouds:
 		# Smaller, lower clouds that cling to mountains, like in the reference.
 		var placed := 0
-		for _try in 4000:
-			if placed >= preset.cloud_count / 2:
+		for _try in 20000:
+			if placed >= int(preset.cloud_count * pow(radius / 1000.0, 2.0)) / 2:
 				break
 			var d := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
 			var ground := shape.height(d)
@@ -254,6 +261,110 @@ func _add_gravity() -> void:
 	add_child(area)
 
 
+## Big rock formations on the mountain slopes. Each one is built from a
+## random pile of five different rock shapes (slab, block, pillar, round,
+## wedge), each piece with its own size, turn and tilt, so no two formations
+## are alike. They are placed over the whole planet at the start (not just
+## near the player), so you can see them from far away, and you can climb them.
+const CLIFF_ROCKS := ["CliffSlab", "CliffBlock", "CliffPillar", "CliffRound", "CliffWedge"]
+
+
+func _add_rock_formations() -> void:
+	var kinds: Array[String] = []
+	for k in CLIFF_ROCKS:
+		if _scatter.variants.has(k):
+			kinds.append(k)
+	if kinds.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = planet_seed * 7703 + 11
+	var buckets := {}   # area of the planet -> rock kind -> Array[Transform3D]
+	var body := StaticBody3D.new()
+	body.name = "RockFormationCollision"
+	body.add_to_group("planet_ground")   # climbable, like cliffs
+	var tries := int(rock_formations * pow(radius / 1000.0, 2.0))
+	for _i in tries:
+		var d := Vector3(rng.randfn(), rng.randfn(), rng.randfn()).normalized()
+		var sm := shape.sample(d)
+		var h := sm.x
+		if h < 6.0 or sm.z > 0.2 or shape.in_landing_site(d) or shape.ice(d) > 0.3:
+			continue
+		# which way the ground faces here
+		var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
+		var t2 := d.cross(t1)
+		var e := 6.0 / radius
+		var d1 := (d + t1 * e).normalized()
+		var d2 := (d + t2 * e).normalized()
+		var p0 := d * (radius + h)
+		var n := (d1 * (radius + shape.height(d1)) - p0).cross(d2 * (radius + shape.height(d2)) - p0).normalized()
+		if n.dot(d) < 0.0:
+			n = -n
+		var slope := n.dot(d)
+		var mountain := sm.y
+		# on mountain sides (not on the ridge tops), a few on steep hills elsewhere
+		var want := mountain > 0.2 and slope > 0.35 and slope < 0.85
+		want = want or (slope > 0.4 and slope < 0.75 and rng.randf() < 0.2)
+		if not want:
+			continue
+
+		var size := rng.randf_range(0.8, 2.4) * lerpf(0.8, 1.3, mountain)
+		var up := (d * 0.45 + n * 0.55).normalized()
+		var frame := PlanetScatter.basis_with_up(up).rotated(up, rng.randf() * TAU)
+		var key := Vector3i(((d + Vector3.ONE) * 2.0).floor())
+		if not buckets.has(key):
+			buckets[key] = {}
+		# a random pile: big pieces at the bottom, smaller ones stacked on top
+		var pieces := rng.randi_range(2, 7)
+		var spread := 5.0 * size
+		var top := 0.0
+		for k in pieces:
+			var kind: String = kinds[rng.randi() % kinds.size()]
+			var layer := float(k) / pieces
+			var s := size * rng.randf_range(0.55, 1.15) * (1.0 - layer * 0.45)
+			var local := Vector3(rng.randf_range(-1.0, 1.0) * spread * (1.0 - layer * 0.6),
+					0.0, rng.randf_range(-1.0, 1.0) * spread * (1.0 - layer * 0.6))
+			# pieces after the first few climb on top of the pile
+			local.y = -2.5 * s if k == 0 else (top * rng.randf_range(0.35, 0.8) - s * 1.2)
+			var axis := Vector3(rng.randf_range(-1, 1), 0.0, rng.randf_range(-1, 1)).normalized()
+			var piece_basis := frame * Basis(Vector3.UP, rng.randf() * TAU)
+			if axis.length() > 0.1:
+				piece_basis = piece_basis * Basis(axis, rng.randf_range(-0.35, 0.35))
+			piece_basis = piece_basis * Basis.from_scale(Vector3(
+					s * rng.randf_range(0.75, 1.3), s * rng.randf_range(0.7, 1.25), s * rng.randf_range(0.75, 1.3)))
+			var origin := p0 + frame * local
+			if not buckets[key].has(kind):
+				buckets[key][kind] = []
+			buckets[key][kind].append(Transform3D(piece_basis, origin))
+			top = maxf(top, local.y + 7.0 * s)
+		# a box roughly the size of the pile, to stand on and climb
+		var col := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(spread * 1.6, maxf(top, 4.0 * size), spread * 1.6)
+		col.shape = box
+		col.transform = Transform3D(frame, p0 + up * (top * 0.5 - 2.0 * size))
+		body.add_child(col)
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("shaders/props.gdshader")
+	var holder := Node3D.new()
+	holder.name = "RockFormations"
+	add_child(holder)
+	for key in buckets:
+		for kind in buckets[key]:
+			var list: Array = buckets[key][kind]
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.mesh = _scatter.variants[kind][0]
+			mm.instance_count = list.size()
+			for i in list.size():
+				mm.set_instance_transform(i, list[i])
+			var mmi := MultiMeshInstance3D.new()
+			mmi.multimesh = mm
+			mmi.material_override = mat
+			mmi.visibility_range_end = 2400.0
+			holder.add_child(mmi)
+	add_child(body)
+
+
 func _add_landing_sites(sites: Array) -> void:
 	var holder := Node3D.new()
 	holder.name = "LandingSites"
@@ -282,35 +393,87 @@ func _setup_sky() -> void:
 	_environment = world.environment
 	_sky_material = ShaderMaterial.new()
 	_sky_material.shader = preload("shaders/sky.gdshader")
-	_sky_material.set_shader_parameter("sky_color", preset.sky)
-	_sky_material.set_shader_parameter("horizon_color", preset.horizon)
+	_sky_material.set_shader_parameter("sky_top", lighting.sky_top)
+	_sky_material.set_shader_parameter("horizon_sun", lighting.horizon_sun)
+	_sky_material.set_shader_parameter("horizon_away", lighting.horizon_away)
+	_sky_material.set_shader_parameter("sun_glow", lighting.sun_glow)
 	var sky := Sky.new()
 	sky.sky_material = _sky_material
 	_environment.background_mode = Environment.BG_SKY
 	_environment.sky = sky
-	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	_environment.ambient_light_sky_contribution = 0.5
-	_environment.ambient_light_color = Color(0.35, 0.4, 0.5)
-	_environment.ambient_light_energy = 1.0
-	_environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	# Shade is lit by a saturated blue/lavender: painterly blue shadows.
+	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_environment.ambient_light_color = lighting.shadow_color
+	_environment.ambient_light_energy = lighting.shadow_energy
+	_environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	_environment.tonemap_exposure = lighting.exposure
 	_environment.adjustment_enabled = true
-	_environment.adjustment_saturation = 1.0
-	_environment.adjustment_contrast = 1.02
-	# Haze: far things fade into the sky colour, with a warm glow towards the sun.
-	_environment.fog_enabled = haze_distance > 0.0
+	_environment.adjustment_saturation = lighting.saturation
+	_environment.adjustment_contrast = lighting.contrast
+	# Haze: far land fades into a warm coloured mist, brighter towards the sun.
+	_environment.fog_enabled = lighting.haze_distance > 0.0
 	_environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	_environment.fog_light_color = preset.horizon
+	_environment.fog_light_color = lighting.haze_color
 	_environment.fog_light_energy = 1.0
-	_environment.fog_sun_scatter = 0.25
+	_environment.fog_sun_scatter = 0.3
 	_environment.fog_sky_affect = 0.0
-	_environment.fog_aerial_perspective = 0.4
-	# A soft glow around bright things (sun, snow, clouds).
+	_environment.fog_aerial_perspective = 0.5
+	# A soft glow around bright things (sun, snow, water, clouds).
 	_environment.glow_enabled = true
-	_environment.glow_intensity = 0.35
+	_environment.glow_intensity = 0.5
 	_environment.glow_strength = 1.0
-	_environment.glow_bloom = 0.04
-	_environment.glow_hdr_threshold = 0.95
+	_environment.glow_bloom = 0.08
+	_environment.glow_hdr_threshold = 0.9
 	_environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	_environment.ssr_enabled = true   # water and wet rock reflect (Forward+ only)
+
+
+func _setup_sun() -> void:
+	if sun == null:
+		sun = _find_sun(get_tree().current_scene if get_tree().current_scene else get_parent())
+	if sun == null:
+		return
+	sun.light_color = lighting.sun_color
+	sun.light_energy = lighting.sun_energy
+	sun.shadow_enabled = true
+	if aim_sun_at_start and not landing_sites.is_empty():
+		aim_sun(landing_sites[0].global_position, lighting.sun_elevation, lighting.sun_azimuth)
+
+
+## Turns the sun so it is `elevation` degrees above the horizon at a place,
+## coming from `azimuth` degrees round the horizon.
+func aim_sun(world_position: Vector3, elevation: float, azimuth: float) -> void:
+	if sun == null:
+		return
+	var up := up_at(world_position)
+	var north := up.cross(Vector3.RIGHT if absf(up.x) < 0.9 else Vector3.FORWARD).normalized()
+	var flat := north.rotated(up, deg_to_rad(azimuth))
+	var to_sun := (up * sin(deg_to_rad(elevation)) + flat * cos(deg_to_rad(elevation))).normalized()
+	var helper := Vector3.UP if absf(to_sun.y) < 0.95 else Vector3.RIGHT
+	sun.global_basis = Basis.looking_at(-to_sun, helper)
+
+
+## Same as aim_sun, but the sun comes from a given direction along the ground.
+func aim_sun_from(world_position: Vector3, elevation: float, from_direction: Vector3) -> void:
+	if sun == null:
+		return
+	var up := up_at(world_position)
+	var flat := (from_direction - up * from_direction.dot(up)).normalized()
+	var to_sun := (up * sin(deg_to_rad(elevation)) + flat * cos(deg_to_rad(elevation))).normalized()
+	var helper := Vector3.UP if absf(to_sun.y) < 0.95 else Vector3.RIGHT
+	sun.global_basis = Basis.looking_at(-to_sun, helper)
+
+
+func _find_sun(node: Node) -> DirectionalLight3D:
+	if node == null:
+		return null
+	if node is DirectionalLight3D:
+		return node
+	for c in node.get_children():
+		var found := _find_sun(c)
+		if found:
+			return found
+	return null
 
 
 func _find_world_environment(node: Node) -> WorldEnvironment:
@@ -326,6 +489,8 @@ func _find_world_environment(node: Node) -> WorldEnvironment:
 
 
 func _process(delta: float) -> void:
+	if _scatter:
+		_scatter.set_planet_origin(global_position)
 	if _clouds:
 		_clouds.rotate(Vector3.UP, delta * 0.002)
 	var cam := get_viewport().get_camera_3d()
@@ -343,8 +508,8 @@ func _process(delta: float) -> void:
 			_environment.fog_light_color = preset.deep_water.lerp(preset.water, 0.4)
 			_environment.fog_density = 0.09
 		else:
-			_environment.fog_light_color = preset.horizon
+			_environment.fog_light_color = lighting.haze_color
 			# Thick near the ground, thinning out as you fly higher.
-			var base := 0.6931 / haze_distance if haze_distance > 0.0 else 0.0
+			var base := 0.6931 / lighting.haze_distance if lighting.haze_distance > 0.0 else 0.0
 			_environment.fog_density = base * exp(-maxf(altitude, 0.0) / (radius * 0.35)) * (1.0 - space)
 		_environment.fog_enabled = _environment.fog_density > 0.0

@@ -59,8 +59,8 @@ C = {k: hex_color(v) for k, v in {
     "rock_dark": "#7f7c77",
     "rock": "#aeaaa2",
     "rock_light": "#d3cfc7",
-    "grass_dark": "#3f9a34",
-    "grass_tip": "#a8de62",
+    "grass_dark": "#4f8f36",
+    "grass_tip": "#b8d46a",
     "fir_dark": "#1f5a3a",
     "fir": "#2b7448",
     "fir_tip": "#4f9a62",
@@ -75,6 +75,11 @@ C = {k: hex_color(v) for k, v in {
     "flower_white": "#fafafa",
     "flower_pink": "#f48fb8",
     "flower_purple": "#a77be0",
+    "lush_dark": "#2f6e2c",
+    "lush_tip": "#86c25a",
+    "leafy_dark": "#2c6630",
+    "leafy": "#5fa846",
+    "flower_cream": "#f3ecc8",
     "fern_dark": "#2f7a34",
     "fern": "#6cbf48",
     "dead_dark": "#5e5249",
@@ -85,7 +90,16 @@ C = {k: hex_color(v) for k, v in {
     "mushroom_stem": "#f1e8d6",
     "mushroom_red": "#d8452f",
     "mushroom_brown": "#a8774a",
-    "tall_grass_tip": "#d4dc78",
+    "tall_grass_tip": "#e2d27e",
+    "larch_dark": "#b8861e",
+    "larch": "#e8b42c",
+    "larch_tip": "#ffd75a",
+    "autumn_dark": "#a8321e",
+    "autumn": "#e0542c",
+    "autumn_tip": "#ff9a48",
+    "sandstone_dark": "#9c7f8c",
+    "sandstone": "#d9ae98",
+    "sandstone_light": "#f3d9c4",
 }.items()}
 
 
@@ -120,7 +134,10 @@ def ring_cone(segments, radius, z0, z1, droop=0.0, jag=0.0, rng=None):
     rim = []
     for i in range(segments):
         a = i / segments * math.tau
-        r = radius * (1.0 + (jag if i % 2 else -jag) * (0.6 + 0.4 * (rng.random() if rng else 0.5)))
+        rnd = rng.random() if rng else 0.5
+        rnd2 = rng.random() if rng else 0.5
+        # branch tips stick out by different amounts, so the tier is ragged and lopsided
+        r = radius * (1.0 + (jag if i % 2 else -jag) * (0.3 + 1.0 * rnd) + (rnd2 - 0.5) * 0.25)
         rim.append(bm.verts.new((math.cos(a) * r, math.sin(a) * r, z0 - droop * (r / radius))))
     # a middle ring gives the tier a soft, rounded shape
     mid = [bm.verts.new((v.co.x * 0.55, v.co.y * 0.55, z0 + (z1 - z0) * 0.45)) for v in rim]
@@ -177,7 +194,15 @@ def make_pine(name, height, tiers, width, snowy, seed, colors=("pine_dark", "pin
         z1 = z0 + (height - base) * 0.34
         if t == tiers - 1:
             z1 = height
-        tier = ring_cone(12, r, z0, z1, droop=r * 0.22, jag=0.12, rng=rng)
+        # many deep notches make each tier look like a ring of drooping branches
+        r *= rng.uniform(0.82, 1.18)
+        tier = ring_cone(rng.randint(14, 20), r, z0, z1, droop=r * rng.uniform(0.2, 0.4), jag=0.24, rng=rng)
+        # shift, tilt and turn every tier a little so the tree isn't symmetrical
+        lean = Matrix.Rotation(rng.uniform(-0.14, 0.14), 3, "X") @ Matrix.Rotation(rng.uniform(-0.14, 0.14), 3, "Y")
+        spin = Matrix.Rotation(rng.uniform(0, math.tau), 3, "Z")
+        bmesh.ops.rotate(tier, verts=tier.verts[:], cent=(0, 0, z0), matrix=lean @ spin)
+        shift = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), 0)) * r * 0.12 + Vector((0.0, 0.0, rng.uniform(-0.15, 0.15) * (z1 - z0)))
+        bmesh.ops.translate(tier, verts=tier.verts[:], vec=shift)
 
         def color(p, n, z0=z0, z1=z1, r=r):
             k = (p.z - z0) / max(0.01, z1 - z0)
@@ -192,7 +217,7 @@ def make_pine(name, height, tiers, width, snowy, seed, colors=("pine_dark", "pin
     return b.finish(name)
 
 
-def make_round_tree(name, height, seed):
+def make_round_tree(name, height, seed, colors=("leaf_dark", "leaf", "leaf_tip")):
     rng = random.Random(seed)
     b = Builder()
     b.add_bmesh(cylinder(7, 0.28, 0.16, -0.4, height * 0.6), bark)
@@ -204,22 +229,26 @@ def make_round_tree(name, height, seed):
         puffs.append(((math.cos(a) * rr, math.sin(a) * rr, crown_z + rng.uniform(-0.12, 0.18) * height),
                       height * rng.uniform(0.17, 0.24)))
 
+    dark, mid, tip = (C[k] for k in colors)
+
     def color(p, n):
         k = (p.z - height * 0.4) / (height * 0.6)
-        c = lerp(C["leaf_dark"], C["leaf"], k)
-        return lerp(c, C["leaf_tip"], max(0.0, n.z) * 0.35)
+        c = lerp(dark, mid, k)
+        return lerp(c, tip, max(0.0, n.z) * 0.35)
 
     for center, r in puffs:
         b.add_bmesh(blob(2, r, center, rng, 0.15), color)
     return b.finish(name)
 
 
-def make_bush(name, size, seed):
+def make_bush(name, size, seed, colors=("leaf_dark", "leaf", "leaf_tip")):
     rng = random.Random(seed)
     b = Builder()
 
+    dark, mid, tip = (C[k] for k in colors)
+
     def color(p, n):
-        return lerp(lerp(C["leaf_dark"], C["leaf"], p.z / size), C["leaf_tip"], max(0.0, n.z) * 0.3)
+        return lerp(lerp(dark, mid, p.z / size), tip, max(0.0, n.z) * 0.3)
 
     for _ in range(4):
         a = rng.uniform(0, math.tau)
@@ -307,12 +336,12 @@ def make_log(name, length, radius, seed):
     return b.finish(name)
 
 
-def make_flowers(name, seed):
+def make_flowers(name, seed, colors=("flower_yellow", "flower_white", "flower_pink", "flower_purple"), count=7):
     """A small patch of wild flowers (shown from both sides)."""
     rng = random.Random(seed)
     b = Builder()
-    colors = ["flower_yellow", "flower_white", "flower_pink", "flower_purple"]
-    for i in range(7):
+    colors = list(colors)
+    for i in range(count):
         a = rng.uniform(0, math.tau)
         x, y = math.cos(a) * rng.uniform(0, 0.3), math.sin(a) * rng.uniform(0, 0.3)
         h = rng.uniform(0.25, 0.45)
@@ -492,6 +521,104 @@ def make_mushrooms(name, seed, cap_key):
     return b.finish(name)
 
 
+def rounded_box(size, roundness, rng, wobble=0.06):
+    """A box with soft rounded edges and a slightly lumpy surface."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=2.0)
+    bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=3, use_grid_fill=True)
+    off = Vector((rng.uniform(-50, 50), rng.uniform(-50, 50), rng.uniform(-50, 50)))
+    for v in bm.verts:
+        c = v.co.copy()
+        # push the corners in towards a ball: higher roundness = softer block
+        c = c.lerp(c.normalized() * 1.25, roundness * 0.6)
+        n = noise.noise(c * 1.3 + off, noise_basis="PERLIN_NEW")
+        c *= 1.0 + n * wobble
+        v.co = Vector((c.x * size[0] * 0.5, c.y * size[1] * 0.5, c.z * size[2] * 0.5))
+    return bm
+
+
+def sandstone_color(height):
+    def color(p, n):
+        strata = 0.5 + 0.5 * math.sin(p.z * 1.7 + math.sin(p.x * 0.3) * 1.5)
+        c = lerp(C["sandstone_dark"], C["sandstone"], 0.35 + 0.4 * strata + max(0.0, p.z / height) * 0.3)
+        return lerp(c, C["sandstone_light"], max(0.0, n.z - 0.4) * 1.2)
+    return color
+
+
+def make_cliff_rock(name, seed, size, roundness, wobble, lean=0.0):
+    """One big sandstone rock. Godot stacks these in endless combinations to
+    build cliffs and rock formations. Base sits on the origin."""
+    rng = random.Random(seed)
+    b = Builder()
+    bm = rounded_box(size, roundness, rng, wobble)
+    if lean:
+        # lean the top over (makes wedges and overhangs)
+        for v in bm.verts:
+            v.co.x += (v.co.z / size[2]) * lean * size[0]
+    bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((0, 0, size[2] * 0.45)))
+    b.add_bmesh(bm, sandstone_color(size[2]), smooth=True)
+    return b.finish(name)
+
+
+def make_grass_clump(name, seed, blades, h_min, h_max, spread, dark, tip):
+    """A clump of curved grass blades (shown from both sides). Each blade bends
+    over in three segments, so the clump looks soft and lush."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(blades):
+        bm = bmesh.new()
+        a = rng.uniform(0, math.tau)
+        r = spread * math.sqrt(rng.random())
+        base = Vector((math.cos(a) * r, math.sin(a) * r, -0.05))
+        h = rng.uniform(h_min, h_max)
+        w = rng.uniform(0.025, 0.05) * (h / 0.6) ** 0.5
+        out = Vector((math.cos(a), math.sin(a), 0)) * rng.uniform(0.6, 1.0)
+        out = out.lerp(Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), 0)), 0.4)
+        bend = rng.uniform(0.15, 0.55)
+        side = Vector((-out.y, out.x, 0)).normalized() * w
+        pts = []
+        for k in range(4):
+            t = k / 3
+            pos = base + Vector((0, 0, h * t * (1.0 - bend * t * 0.5))) + out * (bend * h * t * t)
+            width = 1.0 - t * 0.85
+            pts.append((bm.verts.new(pos - side * width), bm.verts.new(pos + side * width)))
+        for k in range(3):
+            bm.faces.new((pts[k][0], pts[k][1], pts[k + 1][1], pts[k + 1][0]))
+        hh = h
+        b.add_bmesh(bm, lambda p, n, hh=hh: lerp(C[dark], C[tip], (p.z + 0.05) / (hh + 0.05)), smooth=False)
+    return b.finish(name)
+
+
+def make_leafy_bush(name, seed, size):
+    """A low, leafy forest-floor plant with broad pointed leaves
+    (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(rng.randint(9, 14)):
+        a = rng.uniform(0, math.tau)
+        length = size * rng.uniform(0.5, 1.0)
+        rise = rng.uniform(0.3, 0.9)
+        out = Vector((math.cos(a), math.sin(a), 0))
+        side = Vector((-out.y, out.x, 0))
+        bm = bmesh.new()
+        w = length * rng.uniform(0.18, 0.28)
+        start = Vector((0, 0, 0.0))
+        mid = out * length * 0.5 + Vector((0, 0, length * rise * 0.6))
+        tip = out * length + Vector((0, 0, length * rise * 0.35))
+        v0 = bm.verts.new(start)
+        v1 = bm.verts.new(mid + side * w)
+        v2 = bm.verts.new(tip)
+        v3 = bm.verts.new(mid - side * w)
+        v4 = bm.verts.new(mid + Vector((0, 0, w * 0.25)))  # a fold down the middle
+        bm.faces.new((v0, v1, v4))
+        bm.faces.new((v4, v1, v2))
+        bm.faces.new((v0, v4, v3))
+        bm.faces.new((v4, v2, v3))
+        ll = length
+        b.add_bmesh(bm, lambda p, n, ll=ll: lerp(C["leafy_dark"], C["leafy"], min(1.0, Vector((p.x, p.y)).length / ll)), smooth=True)
+    return b.finish(name)
+
+
 def make_tall_grass(name, seed):
     """Tall meadow grass, knee to waist high (shown from both sides)."""
     rng = random.Random(seed)
@@ -574,6 +701,13 @@ def build_all():
         ("RockSnowy", lambda n, a: make_rock(n, a[0], a[1], a[2], snowy=True), solid,
          [(1.6, 0.75, 15), (2.2, 0.6, 60)]),
         ("Grass", lambda n, a: make_grass(n, a[0]), two_sided, [(9,), (61,)]),
+        ("GrassClump", lambda n, a: make_grass_clump(n, a[0], 30, 0.45, 0.85, 0.35, "lush_dark", "lush_tip"),
+         two_sided, [(90,), (91,), (92,)]),
+        ("GrassShort", lambda n, a: make_grass_clump(n, a[0], 16, 0.15, 0.32, 0.3, "grass_dark", "grass_tip"),
+         two_sided, [(93,), (94,)]),
+        ("LeafyBush", lambda n, a: make_leafy_bush(n, a[0], a[1]), two_sided, [(95, 0.7), (96, 1.0), (97, 0.55)]),
+        ("WhiteFlowers", lambda n, a: make_flowers(n, a[0], ("flower_white", "flower_white", "flower_cream"), 11),
+         two_sided, [(98,), (99,)]),
         ("Flowers", lambda n, a: make_flowers(n, a[0]), two_sided, [(14,), (62,), (63,)]),
         ("Fern", lambda n, a: make_fern(n, a[0]), two_sided, [(16,), (64,)]),
         ("Pebbles", lambda n, a: make_pebbles(n, a[0]), solid, [(17,), (65,)]),
@@ -584,6 +718,18 @@ def build_all():
         ("Mushrooms", lambda n, a: make_mushrooms(n, a[0], a[1]), solid,
          [(73, "mushroom_red"), (74, "mushroom_brown")]),
         ("TallGrass", lambda n, a: make_tall_grass(n, a[0]), two_sided, [(75,), (76,)]),
+        ("Larch", lambda n, a: make_pine(n, a[0], a[1], a[2], False, a[3], ("larch_dark", "larch", "larch_tip")),
+         solid, [(10.0, 7, 1.9, 77), (8.5, 6, 1.8, 78), (12.0, 8, 2.0, 79)]),
+        ("AutumnBush", lambda n, a: make_bush(n, a[0], a[1], ("autumn_dark", "autumn", "autumn_tip")), solid,
+         [(1.6, 80), (2.2, 81)]),
+        ("AutumnTree", lambda n, a: make_round_tree(n, a[0], a[1], ("autumn_dark", "autumn", "autumn_tip")), solid,
+         [(6.5, 82), (7.5, 83)]),
+        # five different rock shapes; every formation is built from a random mix
+        ("CliffSlab", lambda n, a: make_cliff_rock(n, a[0], (9.0, 7.0, 3.0), 0.5, 0.08), solid, [(84,)]),
+        ("CliffBlock", lambda n, a: make_cliff_rock(n, a[0], (6.0, 5.5, 5.0), 0.55, 0.07), solid, [(85,)]),
+        ("CliffPillar", lambda n, a: make_cliff_rock(n, a[0], (3.5, 3.2, 9.0), 0.6, 0.06), solid, [(86,)]),
+        ("CliffRound", lambda n, a: make_cliff_rock(n, a[0], (5.5, 5.0, 4.0), 0.95, 0.12), solid, [(87,)]),
+        ("CliffWedge", lambda n, a: make_cliff_rock(n, a[0], (7.0, 4.5, 5.5), 0.45, 0.07, lean=0.35), solid, [(88,)]),
     ]
     built = []
     for base, fn, mat, variants in specs:
@@ -598,7 +744,7 @@ def build_all():
         obj = bpy.data.objects.new(me.name, me)
         obj.location = ((i % 12) * 7.0, (i // 12) * 9.0, 0)
         coll.objects.link(obj)
-        if me.name.startswith("Rock") or me.name.startswith("Boulder"):
+        if me.name.startswith(("Rock", "Boulder", "Cliff")):
             if hasattr(me, "set_sharp_from_angle"):
                 for p in me.polygons:
                     p.use_smooth = True

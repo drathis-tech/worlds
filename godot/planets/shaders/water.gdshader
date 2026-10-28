@@ -53,7 +53,8 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(n_local, 0.0)).xyz);
 
 	float fresnel = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
-	ALBEDO = mix(water_color.rgb, rim_color.rgb, fresnel * 0.5);
+	// looking across the water it mirrors the sky colour
+	ALBEDO = mix(water_color.rgb, rim_color.rgb, fresnel * 0.85);
 	ALPHA = mix(1.0 - clarity, 0.97, fresnel);
 	ROUGHNESS = 0.06;
 	SPECULAR = 0.6;

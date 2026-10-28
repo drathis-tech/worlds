@@ -21,7 +21,11 @@ var _materials := {}  # base model name -> Material
 # into cells so only nearby cells draw.
 # kind: [per square metre, fade start, fade end]
 const SMALL := {
-	"Grass": [1.1, 38.0, 52.0],
+	"Grass": [0.7, 38.0, 52.0],
+	"GrassShort": [0.6, 30.0, 42.0],
+	"GrassClump": [0.22, 45.0, 60.0],
+	"LeafyBush": [0.05, 55.0, 75.0],
+	"WhiteFlowers": [0.07, 35.0, 50.0],
 	"TallGrass": [0.07, 45.0, 62.0],
 	"Flowers": [0.05, 45.0, 60.0],
 	"Fern": [0.09, 60.0, 80.0],
@@ -29,10 +33,11 @@ const SMALL := {
 	"Mushrooms": [0.025, 25.0, 35.0],
 	"Pebbles": [0.03, 45.0, 60.0],
 }
-const SWAYING := ["Grass", "TallGrass", "Flowers", "Fern", "Reeds"]
+const SWAYING := ["Grass", "GrassShort", "GrassClump", "TallGrass", "Flowers", "WhiteFlowers", "Fern", "Reeds", "LeafyBush"]
 const CELLS := 4            # small things: CELLS x CELLS groups per piece
 const LATTICE_M := 2.0      # spacing of the height grid used for small things
-const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush", "DeadTree"]
+const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush", "DeadTree",
+		"Larch", "AutumnTree", "AutumnBush"]
 
 
 func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: PackedScene, p_draw_distance: float) -> void:
@@ -57,8 +62,18 @@ func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: Pac
 		m.shader = preload("shaders/foliage.gdshader")
 		m.set_shader_parameter("fade_start", SMALL[kind][1])
 		m.set_shader_parameter("fade_end", SMALL[kind][2])
-		m.set_shader_parameter("sway", 0.05 if kind == "Fern" else (0.06 if kind == "TallGrass" else 0.12))
+		m.set_shader_parameter("sway", 0.05 if kind in ["Fern", "LeafyBush"] else (0.06 if kind in ["TallGrass", "GrassClump"] else 0.12))
+		m.set_shader_parameter("dry_color", preset.grass_dry)
+		m.set_shader_parameter("golden", kind in ["Grass", "GrassShort", "GrassClump", "TallGrass"])
 		_materials[kind] = m
+
+
+## Grass and plants take on the ground's golden patches; they need to know
+## where the planet is to line the patches up.
+func set_planet_origin(origin: Vector3) -> void:
+	for kind in SWAYING:
+		if _materials.has(kind):
+			(_materials[kind] as ShaderMaterial).set_shader_parameter("planet_origin", origin)
 
 
 func _collect_meshes(node: Node) -> void:
@@ -140,7 +155,14 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 			if rng.randf() * tree_max > density:
 				continue
 			var r := rng.randf()
-			if cold > 0.5 or h > snow_here * 0.6:
+			var fall := shape.autumn(d)
+			if cold <= 0.5 and h <= snow_here * 0.6 and rng.randf() < fall * 0.4:
+				# autumn: golden larches among the pines, red trees and bushes in the open
+				if f > 0.35:
+					kind = "Larch" if r < 0.6 else ("AutumnTree" if r < 0.75 else ("Fir" if r < 0.92 else "AutumnBush"))
+				else:
+					kind = "AutumnTree" if r < 0.35 else ("AutumnBush" if r < 0.8 else "Larch")
+			elif cold > 0.5 or h > snow_here * 0.6:
 				kind = "FirSnowy" if r < 0.5 else ("PineSnowy" if r < 0.9 else "DeadTree")
 			elif cold > 0.2:
 				# taiga: dark firs and pines, a little snow, the odd dead tree
@@ -170,7 +192,7 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 			b = b * Basis.from_scale(Vector3(wide, s * rng.randf_range(0.85, 1.25), wide))
 		var t := Transform3D(b, d * (R + h) - d * sink)
 		_add(placed, kind, t, rng)
-		if kind in TREES and kind != "Bush":
+		if kind in TREES and not kind.ends_with("Bush"):
 			colliders.append([t.origin + up * 2.0 * s, 0.35 * s, 4.0 * s])
 		elif kind == "Boulder" or ((kind == "Rock" or kind == "RockSnowy") and s > 1.0):
 			var size_m := (4.5 if kind == "Boulder" else 1.4) * s
@@ -234,6 +256,17 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 					# thinner under trees (ferns grow there) and on trails
 					ok = h > 1.2 and h < snow * 0.6 and cold < 0.42 and slope > 0.82 \
 							and rng.randf() < (1.0 - forest * 0.6) * (1.0 - trail * 0.9)
+				"GrassShort":
+					ok = h > 1.2 and h < snow * 0.65 and cold < 0.42 and slope > 0.8 and trail < 0.5 \
+							and rng.randf() < 1.0 - forest * 0.7
+				"GrassClump":
+					# lush clumps, thickest around forest edges and along trails
+					ok = h > 1.2 and h < snow * 0.55 and cold < 0.4 and slope > 0.8 and trail < 0.3 \
+							and rng.randf() < 0.35 + 0.65 * (1.0 - absf(forest - 0.35) * 2.0)
+				"LeafyBush":
+					ok = h > 1.5 and h < snow * 0.5 and cold < 0.35 and slope > 0.8 and trail < 0.2 and forest > 0.15
+				"WhiteFlowers":
+					ok = h > 1.5 and h < snow * 0.45 and cold < 0.3 and slope > 0.85 and trail < 0.2 and forest < 0.5
 				"TallGrass":
 					# at the edges of forests and along trails
 					ok = h > 1.5 and h < snow * 0.5 and cold < 0.35 and slope > 0.85 \

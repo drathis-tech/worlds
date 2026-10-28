@@ -132,7 +132,7 @@ func _test_swim() -> void:
 	var walker: PlanetWalker = $Walker
 	await planet.loaded
 	# a place where land drops into water at least 3 m deep
-	var found := _search(func(a, b): return a > 0.5 and b < -3.0)
+	var found := _search(func(a, b): return a > 0.5 and b < -3.0, 2500.0)
 	if found.is_empty():
 		print("Swim test: no shore found nearby")
 		get_tree().quit()
@@ -272,6 +272,8 @@ func _take_shots() -> void:
 	var p := site.global_position
 	var up := site.global_basis.y.normalized()
 	var toward := _toward_highest(p, up, 350.0)
+	# light the view from the side, like a painting, rather than into the sun
+	planet.aim_sun_from(p, planet.lighting.sun_elevation, toward.rotated(up, deg_to_rad(-115.0)))
 
 	var shots := [
 		["ground", p + up * 1.7 - toward * 2.0, p + toward * 120.0 + up * 8.0],
@@ -337,7 +339,8 @@ func _take_shots() -> void:
 				best_top = q
 				best_dir = dir2
 	var tu := planet.up_at(best_top)
-	shots.insert(1, ["vista", best_top + tu * 12.0 - best_dir * 5.0, _ground(best_top + best_dir * 350.0) + tu * 20.0])
+	# up in the air above the landing site, looking towards the mountains
+	shots.insert(1, ["vista", p + up * 70.0 - toward * 160.0, _ground(p + toward * 420.0) + up * 40.0])
 	shots.append(["orbit_pole", Vector3(0.35, 1.0, 0.6).normalized() * R * 2.9, Vector3.ZERO])
 	var only := OS.get_environment("SHOTS")
 	if only != "":
@@ -345,6 +348,10 @@ func _take_shots() -> void:
 	for shot in shots:
 		var eye: Vector3 = shot[1]
 		var target: Vector3 = shot[2]
+		# keep the camera above the ground (the mountains may have grown)
+		var clearance := planet.altitude_of(eye) - planet.ground_height_at(eye)
+		if clearance < 2.0 and eye.length() < R * 1.5:
+			eye += planet.up_at(eye) * (2.0 - clearance)
 		var near_up := planet.up_at(eye)
 		var cam_up := near_up if eye.length() < R * 1.5 else eye.normalized().cross(toward).cross(eye.normalized()).normalized()
 		cam.look_at_from_position(eye, target, cam_up)

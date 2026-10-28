@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="PlanetLighting" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://planets/planet_lighting.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+haze_distance = 560.0
+exposure = 0.92
+sun_glow = Color(1, 0.78, 0.58, 1)

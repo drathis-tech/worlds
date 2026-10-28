@@ -81,9 +81,11 @@ void fragment() {
 
 	// Grass: big soft patches, darker under forests.
 	vec3 grass = mix(grass_light.rgb, grass_dark.rgb, clamp((big - 0.35) * 2.2 + (mid - 0.5) * 0.6, 0.0, 1.0));
-	// sunny, drier patches away from forests
-	float dry = smoothstep(0.55, 0.75, fbm(v_pos * 0.006 + vec3(4.0)) + (mid - 0.5) * 0.3) * (1.0 - v_forest);
-	grass = mix(grass, grass_dry.rgb, dry * 0.6);
+	// Painterly patches of golden grass with soft but clear edges, like
+	// brush strokes, broken up by smaller blobs inside.
+	float patch_n = fbm(v_pos * 0.0065 + vec3(4.0)) + (fbm(v_pos * 0.035) - 0.5) * 0.35 + (mid - 0.5) * 0.12;
+	float dry = smoothstep(0.5, 0.56, patch_n) * (1.0 - v_forest * 0.8);
+	grass = mix(grass, grass_dry.rgb * (0.92 + fine * 0.16), dry * 0.9);
 	grass = mix(grass, forest_floor.rgb, v_forest * 0.85);
 	// colder places and high mountain ledges: darker, bluer alpine grass
 	float line0 = snow_line * (1.0 - smoothstep(0.3, 0.7, v_cold) * 0.85);
@@ -113,6 +115,14 @@ void fragment() {
 	vec3 rock = mix(rock_dark.rgb, rock_light.rgb, clamp(layers * 0.25 + mid * 0.35 + fine * 0.35 + (big - 0.5) * 0.4, 0.0, 1.0));
 	// darker in crevices (steeper parts)
 	rock *= mix(0.8, 1.05, smoothstep(0.2, 0.7, slope));
+	// big vertical streaks and gullies down the cliffs, visible from far away
+	vec3 flat_pos = v_pos - up * h;
+	float streak = fbm(flat_pos * 0.06 + vec3(0.0, h * 0.004, 0.0)) * 0.7 + fbm(flat_pos * 0.18 + vec3(h * 0.01)) * 0.3;
+	rock *= 0.72 + 0.42 * smoothstep(0.32, 0.68, streak);
+	// flatter ledges on the cliffs catch more light
+	rock = mix(rock, rock * 1.15 + vec3(0.03), smoothstep(0.55, 0.7, slope) * 0.6);
+	// warm sandstone low down turning to cool mauve towards the peaks
+	rock = mix(rock, rock * vec3(0.86, 0.8, 1.02), smoothstep(snow_line * 0.25, snow_line * 0.9, h));
 
 	vec3 col = grass;
 
@@ -126,14 +136,29 @@ void fragment() {
 	float line = snow_line * (1.0 - smoothstep(0.3, 0.7, v_cold) * 0.85);
 	float high = smoothstep(line * 0.75, line * 0.95, h + (mid - 0.5) * 12.0);
 	rock_t = max(rock_t, high * (1.0 - smoothstep(0.8, 0.92, slope)));
+	// Cracks: a few dark lines running mostly down the cliffs, only in some
+	// areas, fading out with distance.
+	vec3 cp = flat_pos * 0.07 + up * h * 0.012;
+	float crack_line = abs(vnoise(cp + vec3(1.3, 7.1, 2.9)) - 0.5);
+	float crack_zone = smoothstep(0.55, 0.7, vnoise(flat_pos * 0.02 + vec3(4.0)));
+	float cracks = (1.0 - smoothstep(0.0, 0.02, crack_line)) * crack_zone;
+	rock *= 1.0 - 0.5 * cracks * (1.0 - smoothstep(120.0, 320.0, dist));
 	col = mix(col, rock, rock_t * step(0.0, h));
+	// Grass clinging to ledges and gentler bits of the mountains.
+	float ledge_grass = smoothstep(0.36, 0.5, slope + (fbm(v_pos * 0.05 + vec3(2.0)) - 0.5) * 0.4)
+			* smoothstep(0.36, 0.48, fbm(v_pos * 0.02 + vec3(7.0)))
+			* (1.0 - smoothstep(line * 0.7, line * 0.9, h));
+	vec3 alpine_grass = mix(taiga_grass.rgb, grass_dry.rgb, 0.35 + 0.3 * fine) * (0.9 + 0.2 * mid);
+	col = mix(col, alpine_grass, rock_t * ledge_grass * step(0.0, h));
 
 	// Snow settles on flat-ish high ground, on top of rock ledges, and
 	// everywhere flat in cold places. The snow line drops towards the poles.
-	float snow_h = smoothstep(line - 10.0, line + 2.0, h + (mid - 0.5) * 30.0);
+	float snow_h = smoothstep(line - 4.0, line + 8.0, h + (mid - 0.5) * 30.0);
 	float snow_cold = smoothstep(0.42, 0.55, v_cold + (mid - 0.5) * 0.25);
-	float snow_flat = smoothstep(0.5, 0.72, slope + (fine - 0.5) * 0.25);
-	float snow_t = max(snow_h, snow_cold) * snow_flat * step(-0.5, h);
+	float snow_flat = smoothstep(0.66, 0.84, slope + (fine - 0.5) * 0.25 + (mid - 0.5) * 0.15);
+	// patches of old snow on ledges high on the mountains, below the snow line
+	float snow_patch = smoothstep(line * 0.6, line * 0.8, h) * smoothstep(0.55, 0.7, fbm(v_pos * 0.03 + vec3(9.0))) * smoothstep(0.6, 0.75, slope);
+	float snow_t = max(max(snow_h, snow_cold) * snow_flat, snow_patch) * step(-0.5, h);
 	// soft blue shading in dips and on steeper snow, like real snowdrifts
 	vec3 snow_col = mix(snow_shadow.rgb, snow.rgb, clamp(smoothstep(0.35, 0.8, slope) * (0.85 + fine * 0.15) + (big - 0.5) * 0.2, 0.0, 1.0));
 	col = mix(col, snow_col, snow_t);
@@ -161,6 +186,14 @@ void fragment() {
 		// on snow, trails are trodden-down grey snow instead
 		path = mix(path, mix(snow_shadow.rgb, dirt.rgb, 0.25), snow_t * 0.85);
 		col = mix(col, path, trail);
+	}
+
+	// A white line of foam where the water meets the shore, gently moving.
+	if (v_ice < 0.3) {
+		float wave = sin(TIME * 0.8 + mid * 18.0) * 0.12;
+		float foam_line = 1.0 - smoothstep(0.08, 0.22, abs(h + 0.08 + wave));
+		float foam_breaks = smoothstep(0.35, 0.5, vnoise(v_pos * 0.5 + vec3(TIME * 0.1)));
+		col = mix(col, vec3(0.97, 0.98, 1.0), foam_line * foam_breaks * (1.0 - smoothstep(300.0, 600.0, dist)));
 	}
 
 	// Under water: sea floor tinted towards the water colour.

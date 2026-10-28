@@ -31,6 +31,7 @@ var _terrace: FastNoiseLite    # regions of stepped, terraced hills
 var _trail_main: FastNoiseLite # long winding dirt trails
 var _trail_side: FastNoiseLite # smaller side trails
 var _trail_zone: FastNoiseLite # where side trails are
+var _autumn: FastNoiseLite     # patches where trees have turned gold and red
 
 # The six sides of the cube that gets blown up into a ball:
 # outward axis, u axis, v axis (u x v = outward).
@@ -48,7 +49,7 @@ func _init(p_preset: PlanetPreset, p_radius: float, p_seed: int) -> void:
 	preset = p_preset
 	radius = p_radius
 	var s := p_seed * 7919
-	_continent = _make(s + 1, preset.continent_scale, 4, FastNoiseLite.FRACTAL_FBM)
+	_continent = _make(s + 1, preset.continent_scale, 3, FastNoiseLite.FRACTAL_FBM)
 	# Bends the continents into more natural shapes. (Godot's built-in
 	# domain warp is jumpy at this scale, so it's done by hand.)
 	for k in 3:
@@ -56,10 +57,10 @@ func _init(p_preset: PlanetPreset, p_radius: float, p_seed: int) -> void:
 	_region = _make(s + 2, 1.6, 3, FastNoiseLite.FRACTAL_FBM)
 	_mountains = _make(s + 3, preset.mountain_scale, 4, FastNoiseLite.FRACTAL_FBM)
 	_ridges = _make(s + 9, preset.mountain_scale * 0.8, 2, FastNoiseLite.FRACTAL_FBM)
-	_crags = _make(s + 4, radius / 26.0, 3, FastNoiseLite.FRACTAL_FBM)
+	_crags = _make(s + 4, radius / 45.0, 3, FastNoiseLite.FRACTAL_FBM)
 	_hills = _make(s + 5, 7.0, 3, FastNoiseLite.FRACTAL_FBM)
 	_lakes = _make(s + 6, 3.5, 3, FastNoiseLite.FRACTAL_FBM)
-	_bumps = _make(s + 7, radius / preset.bump_size_m, 3, FastNoiseLite.FRACTAL_FBM)
+	_bumps = _make(s + 7, radius / preset.bump_size_m, 2, FastNoiseLite.FRACTAL_FBM)
 	_patch = _make(s + 8, 2.5, 4, FastNoiseLite.FRACTAL_FBM)
 	_peaks = _make(s + 10, preset.mountain_scale * 3.0, 3, FastNoiseLite.FRACTAL_FBM)
 	_biome = _make(s + 11, 2.2, 3, FastNoiseLite.FRACTAL_FBM)
@@ -73,6 +74,7 @@ func _init(p_preset: PlanetPreset, p_radius: float, p_seed: int) -> void:
 	_trail_main = _make(s + 17, radius / 330.0, 2, FastNoiseLite.FRACTAL_FBM)
 	_trail_side = _make(s + 18, radius / 150.0, 2, FastNoiseLite.FRACTAL_FBM)
 	_trail_zone = _make(s + 19, 3.0, 2, FastNoiseLite.FRACTAL_FBM)
+	_autumn = _make(s + 23, 4.0, 3, FastNoiseLite.FRACTAL_FBM)
 	_calibrate()
 
 
@@ -137,7 +139,7 @@ func in_landing_site(d: Vector3) -> bool:
 
 ## Raw continent value: above the sea level value means land.
 func continent(d: Vector3) -> float:
-	return _continent.get_noise_3dv(d + _warp_at(d) * 0.4)
+	return _continent.get_noise_3dv(d + _warp_at(d) * 0.25)
 
 
 func _warp_at(d: Vector3) -> Vector3:
@@ -159,7 +161,7 @@ func mountain_mask(d: Vector3, land_t: float) -> float:
 	var amount := preset.mountain_amount
 	var region := _region.get_noise_3dv(d) * 0.5 + 0.5
 	# Mountains rise gently from the coast instead of starting as a wall.
-	return smoothstep(0.04, 0.45, land_t) * smoothstep(1.0 - amount, 1.12 - amount * 0.7, region)
+	return smoothstep(0.08, 0.85, land_t) * smoothstep(1.0 - amount, 1.3 - amount * 0.7, region)
 
 
 ## 0..1: how cold a spot is. Poles are cold, and so are some patches
@@ -191,16 +193,34 @@ func ice(d: Vector3) -> float:
 	return smoothstep(0.62, 0.7, coldness(d))
 
 
+## 0..1: how autumnal the trees are at a spot (gold larches, red bushes).
+func autumn(d: Vector3) -> float:
+	return smoothstep(0.15, 0.35, _autumn.get_noise_3dv(d))
+
+
 ## 0..1: forest density at a spot.
 func forest(d: Vector3) -> float:
 	return smoothstep(-0.05, 0.25, _patch.get_noise_3dv(d))
+
+
+## Some mountain slopes get small shelves (grassy ledges) so the faces aren't
+## all smooth; others stay smooth. `mh` is the mountain's own height.
+func _shelves(d: Vector3, mh: float) -> float:
+	var zone := smoothstep(0.32, 0.5, _style.get_noise_3dv(d * 2.7 + Vector3(5.0, 1.0, 3.0)) * 0.5 + 0.5)
+	if zone <= 0.0:
+		return mh
+	# step height wanders a little so the shelves aren't evenly spaced
+	var step_m := 6.0 + _crags.get_noise_3dv(d * 0.3) * 2.0
+	var ts := mh / step_m
+	var shelved := (floorf(ts) + smoothstep(0.2, 1.0, ts - floorf(ts))) * step_m
+	return lerpf(mh, shelved, 0.5 * zone * smoothstep(8.0, 25.0, mh))
 
 
 ## Height in metres above sea level, without landing-site flattening.
 ## Returns Vector3(height, mountain mask, trail amount).
 func raw_height(d: Vector3) -> Vector3:
 	var w := _warp_at(d)
-	var c := _continent.get_noise_3dv(d + w * 0.4)
+	var c := _continent.get_noise_3dv(d + w * 0.25)
 	var bumps := _bumps.get_noise_3dv(d) * preset.bump_height_m
 	if c < _sea:
 		var depth := (_sea - c) / maxf(1e-6, _sea - _c_min)
@@ -222,8 +242,8 @@ func raw_height(d: Vector3) -> Vector3:
 	if terr > 0.0:
 		var t_step := 5.0
 		var tt := h / t_step
-		var stepped := (floorf(tt) + smoothstep(0.65, 1.0, tt - floorf(tt))) * t_step
-		h = lerpf(h, stepped, terr * 0.85)
+		var stepped := (floorf(tt) + smoothstep(0.3, 1.0, tt - floorf(tt))) * t_step
+		h = lerpf(h, stepped, terr * 0.6)
 
 	# Every mountain region has its own style: sharp and ledged, or round.
 	var style := _style.get_noise_3dv(d) * 0.5 + 0.5
@@ -235,33 +255,35 @@ func raw_height(d: Vector3) -> Vector3:
 		var ridge := 1.0 - absf(_ridges.get_noise_3dv(d + w * 0.2))
 		var m := clampf(body * 0.9 + ridge * ridge * (0.15 + 0.45 * sharp) - 0.3, 0.0, 1.0) / 0.75
 		var mh := preset.mountain_height * radius * pow(minf(m, 1.0), lerpf(1.6, 1.15, sharp)) * mask
-		mh += _crags.get_noise_3dv(d) * lerpf(2.0, 4.5, sharp) * mask * smoothstep(5.0, 30.0, mh)
+		mh += _crags.get_noise_3dv(d) * lerpf(1.0, 2.2, sharp) * mask * smoothstep(5.0, 30.0, mh)
 		# Erosion gullies running down the sides.
 		var g := 1.0 - absf(_gully.get_noise_3dv(d + w * 0.05))
-		mh -= pow(g, 7.0) * 5.0 * smoothstep(15.0, 60.0, mh)
+		mh -= pow(g, 7.0) * 3.0 * smoothstep(15.0, 60.0, mh)
 		# Stylized rock ledges: flat steps with steep faces between them.
 		var step := preset.ledge_height_m * lerpf(0.7, 1.3, style)
 		var t := mh / step
-		var ledged := (floorf(t) + smoothstep(0.35, 1.0, t - floorf(t))) * step
+		var ledged := (floorf(t) + smoothstep(0.1, 1.0, t - floorf(t))) * step
 		var ledge_amount := clampf(preset.ledge_strength * lerpf(0.2, 1.5, sharp), 0.0, 0.65)
-		h += lerpf(mh, ledged, ledge_amount * smoothstep(4.0, 20.0, mh))
+		var mtn := lerpf(mh, ledged, ledge_amount * smoothstep(4.0, 20.0, mh))
+		# some slopes get extra small shelves (4 m steps), others stay smooth
+		h += _shelves(d, mtn)
 
 	# Standalone hills and peaks outside the big ranges: good for climbing.
 	if preset.peak_amount > 0.0 and mask < 0.8:
 		var p := _peaks.get_noise_3dv(d + w * 0.2) * 0.5 + 0.5
 		var start := 1.0 - preset.peak_amount * 0.55
-		var peak := smoothstep(start, start + 0.25, p)
+		var peak := smoothstep(start, start + 0.4, p)
 		if peak > 0.0:
 			var ph := preset.peak_height * radius * pow(peak, lerpf(1.9, 1.3, style)) * smoothstep(0.08, 0.3, land_t) * (1.0 - mask)
-			ph += _crags.get_noise_3dv(d) * 2.5 * smoothstep(8.0, 30.0, ph)
-			h += ph
+			ph += _crags.get_noise_3dv(d) * 1.2 * smoothstep(8.0, 30.0, ph)
+			h += _shelves(d, ph)
 			mask = maxf(mask, peak * 0.5 * smoothstep(0.08, 0.3, land_t))
 
 	# Rocky outcrops poking out of the grass.
 	var o := _outcrop.get_noise_3dv(d) * 0.5 + 0.5
-	var crop := smoothstep(0.68, 0.8, o) * smoothstep(0.06, 0.15, land_t) * (1.0 - mask)
+	var crop := smoothstep(0.64, 0.86, o) * smoothstep(0.06, 0.15, land_t) * (1.0 - mask)
 	if crop > 0.0:
-		h += crop * (3.0 + _crags.get_noise_3dv(d * 1.7) * 2.5) * (1.0 + style)
+		h += crop * (2.0 + _crags.get_noise_3dv(d * 1.7) * 1.2) * (1.0 + style * 0.5)
 
 	if preset.lakes > 0.0 and mask < 0.4:
 		var start := 0.42 - 0.22 * preset.lakes
