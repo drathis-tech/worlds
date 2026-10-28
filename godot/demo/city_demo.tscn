@@ -1,0 +1,35 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://demo/city_demo.gd" id="1"]
+[ext_resource type="Script" path="res://planets/city/city_planet.gd" id="2"]
+[ext_resource type="Script" path="res://planets/planet_walker.gd" id="3"]
+
+[sub_resource type="CapsuleShape3D" id="capsule"]
+radius = 0.4
+height = 1.8
+
+[node name="CityDemo" type="Node3D"]
+script = ExtResource("1")
+
+[node name="GalaxyGlow" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.25, 0.433013, 0, 0.866025, 0.5, -0.5, -0.433013, 0.75, 0, 0, 0)
+light_color = Color(0.55, 0.5, 0.95, 1)
+light_energy = 0.2
+
+[node name="CityPlanet" type="Node3D" parent="." node_paths=PackedStringArray("focus", "start_at_landing_site")]
+script = ExtResource("2")
+focus = NodePath("../Walker")
+start_at_landing_site = NodePath("../Walker")
+
+[node name="Walker" type="CharacterBody3D" parent="."]
+script = ExtResource("3")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Walker"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("capsule")
+
+[node name="Camera3D" type="Camera3D" parent="Walker"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+fov = 70.0
+near = 0.1
+far = 20000.0

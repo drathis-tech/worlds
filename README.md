@@ -31,12 +31,47 @@ one number (the seed) and you get a different planet.
 These pictures come from Godot's Compatibility renderer running without a
 graphics card. Forward+ on a real PC will look a bit nicer.
 
+## The city planet
+
+A planet that is one huge city, drifting alone far from any star, so it's
+always night. About 17,000 skyscrapers (up to about 460 m tall in the
+downtown cores) line a street grid that wraps the whole planet. There are
+lit windows, neon signs, holographic billboards, glowing shopfronts, wet
+streets with puddles and street lamps, flying traffic, rain, a purple haze,
+and a galaxy across the sky. Walk the streets, climb buildings, or fly up to
+space. From orbit, the city's grid glows like a lantern.
+
+| Street level | Landing plaza |
+| --- | --- |
+| ![Neon street](previews/city_street.jpg) | ![Landing plaza](previews/city_plaza.jpg) |
+| **Above the avenue** | **From a rooftop** |
+| ![Street canyon](previews/city_canyon.jpg) | ![Galaxy over the downtown](previews/city_rooftop.jpg) |
+| **High above** | **From orbit** |
+| ![The city curving away](previews/city_skyline.jpg) | ![The glowing city planet](previews/city_orbit.jpg) |
+
+**Try it:** in Godot, open `demo/city_demo.tscn` and press **F6** (Run Current
+Scene). The controls are the same as on the nature planet.
+
+**In your game:** add a Node3D with `planets/city/city_planet.gd` (a
+`CityPlanet`). It has the same helpers as `Planet` (`landing_sites`,
+`place_at_landing_site`, `up_at`, `altitude_of` and the `loaded` signal), so
+ships and players work on both. Settings include **Planet Seed**, **Max
+Height**, **Traffic**, **Rain**, **Clouds**, **Haze Distance** and
+**Climbable Buildings**.
+
+```
+godot --path godot res://demo/city_demo.tscn -- --test-walk   # walk the streets, bump into a building
+godot --path godot res://demo/city_demo.tscn -- --test-fly    # fly to space and back
+godot --path godot res://demo/city_demo.tscn -- --shots       # screenshots
+```
+
 ## What's here
 
 | Path | What it is |
 | --- | --- |
 | `godot/` | A Godot 4.7 test project. Open it and press Play to walk around a planet. |
 | `godot/planets/` | **The part your game needs.** Copy this folder into your project. |
+| `godot/planets/city/` | The city planet |
 | `blender/props_generator.py` | Builds the trees, bushes, rocks, logs, flowers and grass in Blender |
 | `previews/` | Screenshots |
 

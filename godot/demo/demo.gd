@@ -10,8 +10,6 @@ extends Node3D
 
 @onready var planet: Planet = $Planet
 
-var _hud: Label
-
 
 func _ready() -> void:
 	if not "--shots" in OS.get_cmdline_user_args():
@@ -30,32 +28,9 @@ func _ready() -> void:
 
 ## On-screen info: what you're doing, altitude, speed and the controls.
 func _make_hud() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	_hud = Label.new()
-	_hud.position = Vector2(16, 12)
-	_hud.add_theme_font_size_override("font_size", 18)
-	_hud.add_theme_color_override("font_color", Color(1, 1, 1))
-	_hud.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
-	_hud.add_theme_constant_override("outline_size", 5)
-	layer.add_child(_hud)
-
-
-func _process(_delta: float) -> void:
-	if _hud == null:
-		return
-	var w: PlanetWalker = $Walker
-	var mode := "WALKING"
-	if w.flying:
-		mode = "FLYING"
-	elif w.swimming:
-		mode = "SWIMMING"
-	elif w.climbing:
-		mode = "CLIMBING"
-	var alt := w.altitude()
-	var where := "in space" if alt > planet.radius * 0.6 else ("in the sky" if alt > 60.0 else "")
-	_hud.text = "%s   altitude %d m %s   speed %d m/s\n" % [mode, roundi(alt), where, roundi(w.velocity.length())]
-	_hud.text += "WASD move · mouse look · Shift run · Space jump/up · C down · F fly · Esc mouse"
+	var hud := PlanetHud.new()
+	hud.walker = $Walker
+	add_child(hud)
 
 
 ## Flies straight up to space and checks nothing breaks on the way.

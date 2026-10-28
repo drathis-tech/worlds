@@ -5,6 +5,7 @@ render_mode blend_mix, diffuse_lambert_wrap, specular_disabled, cull_back;
 uniform vec4 top_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 uniform vec4 bottom_color : source_color = vec4(0.76, 0.84, 0.91, 1.0);
 uniform float glow = 0.25;
+uniform float opacity = 0.92;
 
 varying float v_height;
 varying vec3 v_world;
@@ -40,5 +41,5 @@ void fragment() {
 	// soft, wispy, see-through edges make the puffs look fluffy
 	float wisp = vnoise(v_world * 0.12 + vec3(TIME * 0.05)) * 0.6 + vnoise(v_world * 0.35) * 0.4;
 	float facing = dot(NORMAL, VIEW);
-	ALPHA = smoothstep(0.05, 0.75, facing + (wisp - 0.5) * 0.55) * 0.92;
+	ALPHA = smoothstep(0.05, 0.75, facing + (wisp - 0.5) * 0.55) * opacity;
 }
