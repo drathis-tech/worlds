@@ -29,6 +29,7 @@ import bpy
 from mathutils import Matrix, Vector, noise
 
 COLLECTION = "OrbitOafs_Props"
+VERSIONS = 10   # how many different versions of every model to make
 
 
 def hex_color(h):
@@ -75,6 +76,20 @@ C = {k: hex_color(v) for k, v in {
     "flower_white": "#fafafa",
     "flower_pink": "#f48fb8",
     "flower_purple": "#a77be0",
+    "frost_dark": "#8a8f9e",
+    "frost": "#c9d3df",
+    "clover_dark": "#2f7a32",
+    "clover": "#5fb04a",
+    "heather_stem": "#3f6a35",
+    "heather": "#a86bc8",
+    "heather_pink": "#d77fb4",
+    "berry_red": "#d8323a",
+    "berry_blue": "#4a5ad8",
+    "lupine_purple": "#8a5ad8",
+    "lupine_pink": "#e36fae",
+    "lupine_blue": "#5a8ae8",
+    "moss_dark": "#3f6e2a",
+    "moss": "#7fae3e",
     "lush_dark": "#2f6e2c",
     "lush_tip": "#86c25a",
     "leafy_dark": "#2c6630",
@@ -177,6 +192,13 @@ def blob(subdiv, radius, center, rng, wobble=0.18, squash=1.0):
     return bm
 
 
+def snowy(c, n, start=0.25):
+    """Adds snow lying on the upward-facing parts of a colour."""
+    if n.z <= start:
+        return c
+    return lerp(c, lerp(C["snow_shadow"], C["snow"], n.z), min(1.0, (n.z - start) * 3.5))
+
+
 def bark(p, n):
     return lerp(C["trunk_dark"], C["trunk"], 0.5 + p.z * 0.1)
 
@@ -241,14 +263,15 @@ def make_round_tree(name, height, seed, colors=("leaf_dark", "leaf", "leaf_tip")
     return b.finish(name)
 
 
-def make_bush(name, size, seed, colors=("leaf_dark", "leaf", "leaf_tip")):
+def make_bush(name, size, seed, colors=("leaf_dark", "leaf", "leaf_tip"), snow=False):
     rng = random.Random(seed)
     b = Builder()
 
     dark, mid, tip = (C[k] for k in colors)
 
     def color(p, n):
-        return lerp(lerp(dark, mid, p.z / size), tip, max(0.0, n.z) * 0.3)
+        c = lerp(lerp(dark, mid, p.z / size), tip, max(0.0, n.z) * 0.3)
+        return snowy(c, n) if snow else c
 
     for _ in range(4):
         a = rng.uniform(0, math.tau)
@@ -278,7 +301,7 @@ def make_rock(name, size, squash, seed, sharp=True, snowy=False):
     return b.finish(name)
 
 
-def make_birch(name, height, seed):
+def make_birch(name, height, seed, snow=False):
     """A slim white-barked tree with light, airy leaves."""
     rng = random.Random(seed)
     b = Builder()
@@ -297,6 +320,10 @@ def make_birch(name, height, seed):
         crown.append(((math.cos(a) * rr, math.sin(a) * rr, height * zt), height * rng.uniform(0.12, 0.18)))
 
     def color(p, n):
+        if snow:
+            # winter birch: bare golden-brown crown with snow on top
+            c = lerp(C["frost_dark"], C["frost"], (p.z - height * 0.4) / (height * 0.6))
+            return snowy(c, n, 0.05)
         c = lerp(C["birch_leaf_dark"], C["birch_leaf"], (p.z - height * 0.4) / (height * 0.6))
         return lerp(c, C["birch_leaf_tip"], max(0.0, n.z) * 0.4)
 
@@ -449,13 +476,14 @@ def make_stump(name, seed):
     return b.finish(name)
 
 
-def make_dead_tree(name, height, seed):
+def make_dead_tree(name, height, seed, snow=False):
     """A bare, grey, weathered tree."""
     rng = random.Random(seed)
     b = Builder()
 
     def wood(p, n):
-        return lerp(C["dead_dark"], C["dead"], 0.4 + 0.6 * min(1.0, p.z / height))
+        c = lerp(C["dead_dark"], C["dead"], 0.4 + 0.6 * min(1.0, p.z / height))
+        return snowy(c, n, 0.4) if snow else c
 
     b.add_bmesh(cylinder(7, 0.28, 0.1, -0.4, height), wood)
     for _ in range(rng.randint(4, 6)):
@@ -619,6 +647,142 @@ def make_leafy_bush(name, seed, size):
     return b.finish(name)
 
 
+def leaf_diamond(b, center, length, width, angle, lift, color_fn):
+    """One small flat leaf: a diamond of two triangles pointing out at `angle`."""
+    bm = bmesh.new()
+    out = Vector((math.cos(angle), math.sin(angle), lift))
+    side = Vector((-math.sin(angle), math.cos(angle), 0.0)) * width
+    c = Vector(center)
+    v0 = bm.verts.new(c)
+    v1 = bm.verts.new(c + out * (length * 0.5) + side)
+    v2 = bm.verts.new(c + out * length)
+    v3 = bm.verts.new(c + out * (length * 0.5) - side)
+    bm.faces.new((v0, v1, v2, v3))
+    b.add_bmesh(bm, color_fn, smooth=False)
+
+
+def make_clover(name, seed):
+    """A low carpet of clover: little three-lobed leaves and a few white heads."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(rng.randint(9, 13)):
+        a = rng.uniform(0, math.tau)
+        rr = 0.35 * math.sqrt(rng.random())
+        x, y = math.cos(a) * rr, math.sin(a) * rr
+        z = rng.uniform(0.05, 0.14)
+        shade = rng.uniform(0.0, 1.0)
+        for lobe in range(3):
+            la = lobe * math.tau / 3 + a
+            leaf_diamond(b, (x, y, z), 0.075, 0.035, la, 0.15,
+                         lambda p, n, shade=shade: lerp(C["clover_dark"], C["clover"], 0.4 + 0.6 * shade))
+    for _ in range(rng.randint(1, 3)):
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.3), math.sin(a) * rng.uniform(0, 0.3)
+        b.add_bmesh(blob(1, 0.035, (x, y, 0.17), rng, 0.2, 0.9), lambda p, n: C["flower_white"], smooth=True)
+    return b.finish(name)
+
+
+def make_heather(name, seed):
+    """A low, dense heather shrub with purple-pink flower tips."""
+    rng = random.Random(seed)
+    b = Builder()
+    size = rng.uniform(0.35, 0.6)
+    tip = rng.choice(["heather", "heather_pink"])
+    for _ in range(rng.randint(6, 10)):
+        a = rng.uniform(0, math.tau)
+        rr = size * rng.uniform(0.0, 0.6)
+        r = size * rng.uniform(0.25, 0.4)
+        b.add_bmesh(blob(1, r, (math.cos(a) * rr, math.sin(a) * rr, r * 0.5), rng, 0.3, 0.7),
+                    lambda p, n, tip=tip: lerp(C["heather_stem"], C[tip], min(1.0, max(0.0, (n.z - 0.35) * 2.5)) * min(1.0, p.z / (size * 0.4))), smooth=False)
+    return b.finish(name)
+
+
+def make_berry_bush(name, seed):
+    """A round bush with clusters of red berries."""
+    rng = random.Random(seed)
+    b = Builder()
+    size = rng.uniform(0.9, 1.4)
+
+    def leaf(p, n):
+        return lerp(lerp(C["leaf_dark"], C["leaf"], p.z / size), C["leaf_tip"], max(0.0, n.z) * 0.25)
+
+    for _ in range(4):
+        a = rng.uniform(0, math.tau)
+        rr = size * rng.uniform(0.1, 0.3)
+        r = size * rng.uniform(0.3, 0.42)
+        b.add_bmesh(blob(2, r, (math.cos(a) * rr, math.sin(a) * rr, r * 0.65), rng, 0.2, 0.85), leaf)
+    berry = rng.choice(["berry_red", "berry_blue"])
+    for _ in range(rng.randint(14, 24)):
+        a = rng.uniform(0, math.tau)
+        e = rng.uniform(0.1, 1.2)
+        rad = size * 0.48
+        p = Vector((math.cos(a) * math.cos(e) * rad, math.sin(a) * math.cos(e) * rad, size * 0.3 + math.sin(e) * rad * 0.8))
+        b.add_bmesh(blob(1, 0.045, p, rng, 0.05), lambda p, n, berry=berry: C[berry], smooth=True)
+    return b.finish(name)
+
+
+def make_lupines(name, seed):
+    """Tall spikes of purple, pink or blue flowers (shown from both sides)."""
+    rng = random.Random(seed)
+    b = Builder()
+    color = rng.choice(["lupine_purple", "lupine_pink", "lupine_blue"])
+    for _ in range(rng.randint(3, 6)):
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.25), math.sin(a) * rng.uniform(0, 0.25)
+        h = rng.uniform(0.5, 0.9)
+        stem = cylinder(4, 0.012, 0.008, -0.05, h)
+        for v in stem.verts:
+            v.co.x += x
+            v.co.y += y
+        b.add_bmesh(stem, lambda p, n: C["flower_stem"], smooth=False)
+        # leaves at the bottom
+        for k in range(5):
+            la = k * math.tau / 5 + rng.uniform(0, 0.5)
+            leaf_diamond(b, (x, y, 0.04), 0.16, 0.035, la, 0.3, lambda p, n: C["leafy"])
+        steps = rng.randint(4, 5)
+        for k in range(steps):
+            t = k / steps
+            z = h * (0.45 + 0.55 * t)
+            r = 0.055 * (1.0 - t * 0.55)
+            b.add_bmesh(blob(1, r, (x, y, z), rng, 0.25, 1.5),
+                        lambda p, n, color=color, t=t: lerp(C[color], C["flower_white"], t * 0.35), smooth=True)
+    return b.finish(name)
+
+
+def make_dandelions(name, seed):
+    """A little patch of dandelions: yellow heads and some white puffballs."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(rng.randint(4, 8)):
+        a = rng.uniform(0, math.tau)
+        x, y = math.cos(a) * rng.uniform(0, 0.3), math.sin(a) * rng.uniform(0, 0.3)
+        h = rng.uniform(0.12, 0.3)
+        stem = cylinder(4, 0.008, 0.007, -0.02, h)
+        for v in stem.verts:
+            v.co.x += x
+            v.co.y += y
+        b.add_bmesh(stem, lambda p, n: C["flower_stem"], smooth=False)
+        puff = rng.random() < 0.3
+        head = blob(1, 0.05 if puff else 0.035, (x, y, h), rng, 0.15, 1.0 if puff else 0.5)
+        b.add_bmesh(head, lambda p, n, puff=puff: C["flower_white"] if puff else C["flower_yellow"], smooth=True)
+        for k in range(3):
+            leaf_diamond(b, (x, y, 0.02), 0.13, 0.03, rng.uniform(0, math.tau), 0.1, lambda p, n: C["clover_dark"])
+    return b.finish(name)
+
+
+def make_moss(name, seed):
+    """Soft, lumpy cushions of moss for rocks, logs and forest floors."""
+    rng = random.Random(seed)
+    b = Builder()
+    for _ in range(rng.randint(3, 6)):
+        a = rng.uniform(0, math.tau)
+        rr = rng.uniform(0, 0.35)
+        r = rng.uniform(0.12, 0.25)
+        b.add_bmesh(blob(1, r, (math.cos(a) * rr, math.sin(a) * rr, 0.0), rng, 0.25, 0.35),
+                    lambda p, n: lerp(C["moss_dark"], C["moss"], max(0.0, n.z) * 0.8 + 0.2), smooth=True)
+    return b.finish(name)
+
+
 def make_tall_grass(name, seed):
     """Tall meadow grass, knee to waist high (shown from both sides)."""
     rng = random.Random(seed)
@@ -710,6 +874,15 @@ def build_all():
          two_sided, [(98,), (99,)]),
         ("Flowers", lambda n, a: make_flowers(n, a[0]), two_sided, [(14,), (62,), (63,)]),
         ("Fern", lambda n, a: make_fern(n, a[0]), two_sided, [(16,), (64,)]),
+        ("Clover", lambda n, a: make_clover(n, a[0]), solid, [(200,)]),
+        ("Heather", lambda n, a: make_heather(n, a[0]), solid, [(201,)]),
+        ("BerryBush", lambda n, a: make_berry_bush(n, a[0]), solid, [(202,)]),
+        ("Lupines", lambda n, a: make_lupines(n, a[0]), two_sided, [(203,)]),
+        ("Dandelions", lambda n, a: make_dandelions(n, a[0]), two_sided, [(204,)]),
+        ("Moss", lambda n, a: make_moss(n, a[0]), solid, [(205,)]),
+        ("BirchSnowy", lambda n, a: make_birch(n, a[0], a[1], snow=True), solid, [(9.0, 206)]),
+        ("BushSnowy", lambda n, a: make_bush(n, a[0], a[1], snow=True), solid, [(1.6, 207)]),
+        ("DeadTreeSnowy", lambda n, a: make_dead_tree(n, a[0], a[1], snow=True), solid, [(7.5, 208)]),
         ("Pebbles", lambda n, a: make_pebbles(n, a[0]), solid, [(17,), (65,)]),
         ("Log", lambda n, a: make_log(n, a[0], a[1], a[2]), solid, [(5.0, 0.35, 13), (6.5, 0.45, 66)]),
         ("Stump", lambda n, a: make_stump(n, a[0]), solid, [(67,), (68,)]),
@@ -725,15 +898,47 @@ def build_all():
         ("AutumnTree", lambda n, a: make_round_tree(n, a[0], a[1], ("autumn_dark", "autumn", "autumn_tip")), solid,
          [(6.5, 82), (7.5, 83)]),
         # five different rock shapes; every formation is built from a random mix
-        ("CliffSlab", lambda n, a: make_cliff_rock(n, a[0], (9.0, 7.0, 3.0), 0.5, 0.08), solid, [(84,)]),
-        ("CliffBlock", lambda n, a: make_cliff_rock(n, a[0], (6.0, 5.5, 5.0), 0.55, 0.07), solid, [(85,)]),
-        ("CliffPillar", lambda n, a: make_cliff_rock(n, a[0], (3.5, 3.2, 9.0), 0.6, 0.06), solid, [(86,)]),
-        ("CliffRound", lambda n, a: make_cliff_rock(n, a[0], (5.5, 5.0, 4.0), 0.95, 0.12), solid, [(87,)]),
-        ("CliffWedge", lambda n, a: make_cliff_rock(n, a[0], (7.0, 4.5, 5.5), 0.45, 0.07, lean=0.35), solid, [(88,)]),
+        ("CliffSlab", lambda n, a: make_cliff_rock(n, a[0], a[1:4], 0.5, 0.08), solid, [(84, 9.0, 7.0, 3.0)]),
+        ("CliffBlock", lambda n, a: make_cliff_rock(n, a[0], a[1:4], 0.55, 0.07), solid, [(85, 6.0, 5.5, 5.0)]),
+        ("CliffPillar", lambda n, a: make_cliff_rock(n, a[0], a[1:4], 0.6, 0.06), solid, [(86, 3.5, 3.2, 9.0)]),
+        ("CliffRound", lambda n, a: make_cliff_rock(n, a[0], a[1:4], 0.95, 0.12), solid, [(87, 5.5, 5.0, 4.0)]),
+        ("CliffWedge", lambda n, a: make_cliff_rock(n, a[0], a[1:4], 0.45, 0.07, lean=0.35), solid, [(88, 7.0, 4.5, 5.5)]),
     ]
+    # What each argument is, so extra versions can be made by changing them:
+    # f = a size (varied up to +-20%), i = a count (varied by +-1),
+    # s = a random seed (a new one gives a new shape), x = keep as it is.
+    roles = {
+        "Pine": "fifs", "PineTall": "fifs", "PineSnowy": "fifs", "Fir": "fifs", "FirSnowy": "fifs",
+        "Larch": "fifs", "Birch": "fs", "RoundTree": "fs", "AutumnTree": "fs", "Bush": "fs",
+        "AutumnBush": "fs", "Rock": "ffs", "RockFlat": "ffs", "Boulder": "ffs", "RockSnowy": "ffs",
+        "Log": "ffs", "DeadTree": "fs", "LeafyBush": "sf", "Mushrooms": "sx",
+        "BirchSnowy": "fs", "BushSnowy": "fs", "DeadTreeSnowy": "fs",
+        "CliffSlab": "sfff", "CliffBlock": "sfff", "CliffPillar": "sfff", "CliffRound": "sfff", "CliffWedge": "sfff",
+    }
+    vary = random.Random(2024)
+
+    def make_version(base_args, role):
+        out = []
+        for value, r in zip(base_args, role):
+            if r == "f":
+                out.append(value * vary.uniform(0.8, 1.22))
+            elif r == "i":
+                out.append(max(2, value + vary.randint(-1, 1)))
+            elif r == "s":
+                out.append(vary.randint(100, 99999))
+            else:
+                out.append(value)
+        return tuple(out)
+
     built = []
     for base, fn, mat, variants in specs:
-        for k, args in enumerate(variants):
+        role = roles.get(base, "s")
+        versions = list(variants)
+        k = 0
+        while len(versions) < VERSIONS:
+            versions.append(make_version(variants[k % len(variants)], role))
+            k += 1
+        for k, args in enumerate(versions[:VERSIONS]):
             name = base if k == 0 else "%s_%d" % (base, k + 1)
             built.append((fn(name, args), mat))
     models = built
@@ -742,7 +947,7 @@ def build_all():
         me.materials.append(mat)
         me.color_attributes.active_color = me.color_attributes["Col"]
         obj = bpy.data.objects.new(me.name, me)
-        obj.location = ((i % 12) * 7.0, (i // 12) * 9.0, 0)
+        obj.location = ((i % VERSIONS) * 8.0, (i // VERSIONS) * 10.0, 0)
         coll.objects.link(obj)
         if me.name.startswith(("Rock", "Boulder", "Cliff")):
             if hasattr(me, "set_sharp_from_angle"):

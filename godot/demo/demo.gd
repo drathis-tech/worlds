@@ -329,6 +329,35 @@ func _take_shots() -> void:
 		var fu := planet.up_at(forest_spot)
 		var ff := fu.cross(Vector3.UP if absf(fu.y) < 0.9 else Vector3.RIGHT).normalized()
 		shots.insert(3, ["forest", forest_spot + fu * 1.7, forest_spot + ff * 30.0 + fu * 2.5])
+	# A river winding through its valley: from the bank, and from above.
+	var river_spot := _find_spot(func(d: Vector3) -> bool:
+		return planet.shape.river_flow(d).w > 0.7 and planet.shape.coldness(d) < 0.3)
+	if river_spot != Vector3.ZERO:
+		var ru := planet.up_at(river_spot)
+		var fl := planet.shape.river_flow(planet.to_local(river_spot).normalized())
+		var rf := planet.global_basis * Vector3(fl.x, fl.y, fl.z)
+		rf = (rf - ru * rf.dot(ru)).normalized()
+		var side := ru.cross(rf)
+		shots.append(["river", river_spot - rf * 25.0 + side * 16.0 + ru * 3.0, river_spot + rf * 50.0 + ru * 1.0])
+		shots.append(["valley", river_spot - rf * 120.0 + side * 40.0 + ru * 55.0, river_spot + rf * 150.0])
+	# Kneeling in an open meadow, to see the small plants.
+	var meadow := _find_spot(func(d: Vector3) -> bool:
+		var sm := planet.shape.sample(d)
+		return sm.x > 5.0 and sm.x < 40.0 and sm.z < 0.05 and sm.y < 0.05 and planet.shape.forest(d) < 0.2 \
+				and planet.shape.forest(d) > 0.05 and planet.shape.coldness(d) < 0.15)
+	if meadow != Vector3.ZERO:
+		var mu := planet.up_at(meadow)
+		var mf := mu.cross(Vector3.UP if absf(mu.y) < 0.9 else Vector3.RIGHT).normalized()
+		shots.append(["meadow", meadow + mu * 1.1, meadow + mf * 25.0 + mu * 0.2])
+	# A snowy forest at the edge of the cold lands.
+	var taiga := _find_spot(func(d: Vector3) -> bool:
+		var c := planet.shape.coldness(d)
+		return c > 0.55 and c < 0.8 and planet.shape.forest(d) > 0.5 and planet.shape.height(d) > 4.0 \
+				and planet.shape.raw_height(d).y < 0.15)
+	if taiga != Vector3.ZERO:
+		var tgu := planet.up_at(taiga)
+		var tgf := tgu.cross(Vector3.UP if absf(tgu.y) < 0.9 else Vector3.RIGHT).normalized()
+		shots.append(["snow_forest", taiga + tgu * 4.0 - tgf * 10.0, taiga + tgf * 40.0 + tgu * 3.0])
 	# From the top of the highest nearby hill, looking out over the land.
 	var best_top := p
 	var best_dir := toward

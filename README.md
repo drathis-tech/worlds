@@ -5,9 +5,10 @@ Explorable planets for **Orbit Oafs**, a game about exploring space and finding 
 Each planet is full size: about **20 minutes to run around** (12 m/s), or
 about 48 minutes at walking pace. Ships
 can land, and players can walk, run, swim and climb. There are forests,
-meadows full of swaying grass and flowers, golden grass patches, autumn
-larches and red bushes, dirt trails winding all over, lakes with reeds and
-foamy shores, gentle mountains with sandstone rock formations, snowy biomes
+meadows full of swaying grass, clover, dandelions, lupines and berry bushes,
+golden grass patches, heather on the hills, autumn larches and red bushes,
+dirt trails winding all over, river valleys with flowing water, lakes with
+reeds and foamy shores, gentle mountains with sandstone rock formations, snowy biomes
 and frozen polar seas, all in warm golden-hour light with coloured haze in
 the distance. You can
 also fly straight up to space and back. The ground is built inside
@@ -135,6 +136,10 @@ Godot to change:
 
 - the ocean amount, mountain height and how many there are, and standalone peaks
 - lakes and the snow line
+- **Rivers**: how many there are, how far apart (**River Spacing M**), how wide
+  the water is (**River Width M**) and how wide their valleys are
+  (**Valley Width M**). Rivers wind through the flat lowlands; the water
+  flows and carries streaks of foam downstream.
 - the size of the snowy polar caps (**Polar Cap**) and how many snowy areas
   there are away from the poles (**Snowy Biomes**)
 - every colour, tree and rock density, and the number of clouds
@@ -151,7 +156,7 @@ Settings on the Planet node:
 - Haze colour and thickness are part of the **Lighting** preset.
 - **Low Clouds**: small clouds that drift around mountain tops.
 
-Grass, flowers, ferns and pebbles are only drawn close by: grass to about 50 m,
+Grass, flowers, clover, moss, ferns and pebbles are only drawn close by: grass to about 50 m,
 ferns to 80 m. They fade in smoothly instead of popping. You can change those
 distances and densities at the top of `planets/planet_scatter.gd` (`SMALL`).
 
@@ -166,11 +171,13 @@ The props are made by `blender/props_generator.py` and saved to
    `DeadTree`, `Log`, `Stump`, `Flowers`, `Fern`, `Reeds`, `Mushrooms`,
    `TallGrass`, `GrassClump`, `GrassShort`, `LeafyBush`, `WhiteFlowers`, `Larch`,
    `AutumnTree`, `AutumnBush`, `Pebbles`, `Rock`, `RockFlat`, `RockSnowy`, `Boulder`,
-   `Grass`, and the five rock-formation pieces `CliffSlab`, `CliffBlock`,
+   `Grass`, `Clover`, `Heather`, `BerryBush`, `Lupines`, `Dandelions`, `Moss`,
+   `BirchSnowy`, `BushSnowy`, `DeadTreeSnowy`, and the five rock-formation pieces `CliffSlab`, `CliffBlock`,
    `CliffPillar`, `CliffRound`, `CliffWedge`),
    because Godot finds them by name. Extra versions of a model are named with
    a number on the end (`Pine_2`, `Pine_3`, ...). Godot picks one at random for
-   each prop, so you can add as many versions as you like.
+   each prop, so you can add as many versions as you like. The script makes
+   10 versions of every model (`VERSIONS` at the top of `build_all`).
 3. Export them as `props.glb` into `godot/planets/models/`.
 
 From the command line:
@@ -199,9 +206,18 @@ SHOTS=vista,ground godot --path godot -- --shots   # only some of the screenshot
 
 ## How the planet avoids looking repetitive
 
-- **Props:** every tree, rock, bush and plant has 2–4 different models.
+- **Props:** every tree, rock, bush and plant has 10 different models.
   Each one placed also gets its own height, width, turn, slight lean (rocks
   tilt and sink into the ground) and colour tint.
+- **Ground plants:** about 17 kinds, each growing where it makes sense:
+  clover and dandelions in drifts on meadows, lupines on open hillsides,
+  heather up high and in cooler places, moss on forest floors and shores,
+  ferns and mushrooms under trees, reeds at the water.
+- **Rock texture:** rocks and rock formations get blotches of lighter and
+  darker stone, layers, speckles, cracks, yellow and orange lichen and moss
+  on their tops, different on every rock.
+- **Snowy trees:** snowy pines, firs, birches, bushes and dead trees in the
+  cold lands, with more snow the colder it gets.
 - **Mountains:** each mountain region has its own style, from sharp and
   ledged to round and smooth. Their shapes are bent by noise, with erosion
   gullies down their sides, standalone peaks and rocky outcrops in meadows.

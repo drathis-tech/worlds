@@ -73,6 +73,11 @@ func _ready() -> void:
 	if _scatter.has_props():
 		terrain.scatter_maker = _scatter.make_data
 		terrain.scatter_builder = _scatter.build_node
+	var river_mat := ShaderMaterial.new()
+	river_mat.shader = preload("shaders/river.gdshader")
+	river_mat.set_shader_parameter("water_color", preset.water.lerp(preset.shallow_water, 0.35))
+	river_mat.set_shader_parameter("sky_color", lighting.horizon_sun.lerp(lighting.sky_top, 0.4))
+	terrain.river_material = river_mat
 	terrain.setup(shape, _terrain_material())
 	terrain.first_load_finished.connect(_on_first_load)
 	add_child(terrain)
@@ -263,8 +268,8 @@ func _add_gravity() -> void:
 
 ## Big rock formations on the mountain slopes. Each one is built from a
 ## random pile of five different rock shapes (slab, block, pillar, round,
-## wedge), each piece with its own size, turn and tilt, so no two formations
-## are alike. They are placed over the whole planet at the start (not just
+## wedge), with 10 versions of each, every piece with its own size, turn and
+## tilt, so no two formations are alike. They are placed over the whole planet at the start (not just
 ## near the player), so you can see them from far away, and you can climb them.
 const CLIFF_ROCKS := ["CliffSlab", "CliffBlock", "CliffPillar", "CliffRound", "CliffWedge"]
 
@@ -310,7 +315,7 @@ func _add_rock_formations() -> void:
 		var size := rng.randf_range(0.8, 2.4) * lerpf(0.8, 1.3, mountain)
 		var up := (d * 0.45 + n * 0.55).normalized()
 		var frame := PlanetScatter.basis_with_up(up).rotated(up, rng.randf() * TAU)
-		var key := Vector3i(((d + Vector3.ONE) * 2.0).floor())
+		var key := Vector3i(((d + Vector3.ONE) * 1.0).floor())
 		if not buckets.has(key):
 			buckets[key] = {}
 		# a random pile: big pieces at the bottom, smaller ones stacked on top
@@ -319,6 +324,7 @@ func _add_rock_formations() -> void:
 		var top := 0.0
 		for k in pieces:
 			var kind: String = kinds[rng.randi() % kinds.size()]
+			var version := rng.randi() % (_scatter.variants[kind] as Array).size()
 			var layer := float(k) / pieces
 			var s := size * rng.randf_range(0.55, 1.15) * (1.0 - layer * 0.45)
 			var local := Vector3(rng.randf_range(-1.0, 1.0) * spread * (1.0 - layer * 0.6),
@@ -332,9 +338,10 @@ func _add_rock_formations() -> void:
 			piece_basis = piece_basis * Basis.from_scale(Vector3(
 					s * rng.randf_range(0.75, 1.3), s * rng.randf_range(0.7, 1.25), s * rng.randf_range(0.75, 1.3)))
 			var origin := p0 + frame * local
-			if not buckets[key].has(kind):
-				buckets[key][kind] = []
-			buckets[key][kind].append(Transform3D(piece_basis, origin))
+			var vkey := "%s|%d" % [kind, version]
+			if not buckets[key].has(vkey):
+				buckets[key][vkey] = []
+			buckets[key][vkey].append(Transform3D(piece_basis, origin))
 			top = maxf(top, local.y + 7.0 * s)
 		# a box roughly the size of the pile, to stand on and climb
 		var col := CollisionShape3D.new()
@@ -345,15 +352,16 @@ func _add_rock_formations() -> void:
 		body.add_child(col)
 	var mat := ShaderMaterial.new()
 	mat.shader = preload("shaders/props.gdshader")
+	mat.set_shader_parameter("rocky", true)
 	var holder := Node3D.new()
 	holder.name = "RockFormations"
 	add_child(holder)
 	for key in buckets:
-		for kind in buckets[key]:
-			var list: Array = buckets[key][kind]
+		for vkey in buckets[key]:
+			var list: Array = buckets[key][vkey]
 			var mm := MultiMesh.new()
 			mm.transform_format = MultiMesh.TRANSFORM_3D
-			mm.mesh = _scatter.variants[kind][0]
+			mm.mesh = _scatter.variants[String(vkey).get_slice("|", 0)][int(String(vkey).get_slice("|", 1))]
 			mm.instance_count = list.size()
 			for i in list.size():
 				mm.set_instance_transform(i, list[i])

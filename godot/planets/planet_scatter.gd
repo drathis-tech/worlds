@@ -32,12 +32,23 @@ const SMALL := {
 	"Reeds": [0.25, 55.0, 75.0],
 	"Mushrooms": [0.025, 25.0, 35.0],
 	"Pebbles": [0.03, 45.0, 60.0],
+	"Clover": [0.1, 30.0, 42.0],
+	"Heather": [0.08, 45.0, 60.0],
+	"BerryBush": [0.012, 60.0, 80.0],
+	"Lupines": [0.035, 50.0, 65.0],
+	"Dandelions": [0.05, 30.0, 42.0],
+	"Moss": [0.07, 35.0, 48.0],
 }
-const SWAYING := ["Grass", "GrassShort", "GrassClump", "TallGrass", "Flowers", "WhiteFlowers", "Fern", "Reeds", "LeafyBush"]
-const CELLS := 4            # small things: CELLS x CELLS groups per piece
+const SWAYING := ["Grass", "GrassShort", "GrassClump", "TallGrass", "Flowers", "WhiteFlowers", "Fern", "Reeds", "LeafyBush",
+		"Clover", "Heather", "BerryBush", "Lupines", "Dandelions", "Moss"]
+# how much each kind moves in the wind (the default is 0.12)
+const SWAY := {"Fern": 0.05, "LeafyBush": 0.05, "TallGrass": 0.06, "GrassClump": 0.06, "Clover": 0.04,
+		"Heather": 0.03, "BerryBush": 0.02, "Lupines": 0.08, "Moss": 0.0}
+const ROCKS := ["Rock", "RockFlat", "Boulder", "RockSnowy", "Pebbles"]
+const CELLS := 3            # small things: CELLS x CELLS groups per piece
 const LATTICE_M := 2.0      # spacing of the height grid used for small things
 const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush", "DeadTree",
-		"Larch", "AutumnTree", "AutumnBush"]
+		"Larch", "AutumnTree", "AutumnBush", "BirchSnowy", "BushSnowy", "DeadTreeSnowy"]
 
 
 func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: PackedScene, p_draw_distance: float) -> void:
@@ -55,14 +66,16 @@ func _init(p_shape: PlanetShape, p_preset: PlanetPreset, p_seed: int, props: Pac
 	still.shader = preload("shaders/props.gdshader")
 	var trees := still.duplicate()
 	trees.set_shader_parameter("sway", 0.012)
+	var rocks := still.duplicate()
+	rocks.set_shader_parameter("rocky", true)
 	for kind in variants:
-		_materials[kind] = trees if kind in TREES else still
+		_materials[kind] = trees if kind in TREES else (rocks if kind in ROCKS else still)
 	for kind in SWAYING:
 		var m := ShaderMaterial.new()
 		m.shader = preload("shaders/foliage.gdshader")
 		m.set_shader_parameter("fade_start", SMALL[kind][1])
 		m.set_shader_parameter("fade_end", SMALL[kind][2])
-		m.set_shader_parameter("sway", 0.05 if kind in ["Fern", "LeafyBush"] else (0.06 if kind in ["TallGrass", "GrassClump"] else 0.12))
+		m.set_shader_parameter("sway", SWAY.get(kind, 0.12))
 		m.set_shader_parameter("dry_color", preset.grass_dry)
 		m.set_shader_parameter("golden", kind in ["Grass", "GrassShort", "GrassClump", "TallGrass"])
 		_materials[kind] = m
@@ -101,9 +114,16 @@ static func basis_with_up(up: Vector3) -> Basis:
 	return Basis(x, up, x.cross(up))
 
 
-## Adds one prop, as a random one of the model's versions.
+## Adds one prop, as a random one of the model's versions. Small plants
+## use two versions per cell (cells next to each other pick different ones),
+## which keeps the number of things to draw down.
 func _add(placed: Dictionary, kind: String, t: Transform3D, rng: RandomNumberGenerator, cell := -1) -> void:
-	var key := "%s|%d" % [kind, rng.randi() % variants[kind].size()]
+	var n: int = variants[kind].size()
+	var version := rng.randi() % n
+	if cell >= 0:
+		var first := absi(hash([kind, cell, t.origin.snapped(Vector3.ONE * 200.0)])) % n
+		version = (first + rng.randi() % 2) % n
+	var key := "%s|%d" % [kind, version]
 	if cell >= 0:
 		key += "#%d" % cell
 	if not placed.has(key):
@@ -163,16 +183,25 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 				else:
 					kind = "AutumnTree" if r < 0.35 else ("AutumnBush" if r < 0.8 else "Larch")
 			elif cold > 0.5 or h > snow_here * 0.6:
-				kind = "FirSnowy" if r < 0.5 else ("PineSnowy" if r < 0.9 else "DeadTree")
+				# snowfields: snowy firs, pines and birches, snowy bushes, bare dead trees
+				kind = "FirSnowy" if r < 0.36 else ("PineSnowy" if r < 0.62 else ("BirchSnowy" if r < 0.78 \
+						else ("BushSnowy" if r < 0.92 else ("DeadTreeSnowy" if r < 0.98 else "DeadTree"))))
 			elif cold > 0.2:
-				# taiga: dark firs and pines, a little snow, the odd dead tree
-				kind = "Fir" if r < 0.45 else ("PineSnowy" if r < 0.6 else ("Pine" if r < 0.85 else ("DeadTree" if r < 0.9 else ("Log" if r < 0.96 else "Stump"))))
+				# taiga: dark firs and pines, some snow on the colder side, the odd dead tree
+				var snowy := rng.randf() < (cold - 0.2) * 2.5
+				if snowy:
+					kind = "FirSnowy" if r < 0.4 else ("PineSnowy" if r < 0.65 else ("BirchSnowy" if r < 0.82 else ("BushSnowy" if r < 0.95 else "DeadTreeSnowy")))
+				else:
+					kind = "Fir" if r < 0.45 else ("PineSnowy" if r < 0.55 else ("Pine" if r < 0.8 else ("Birch" if r < 0.86 \
+							else ("DeadTree" if r < 0.9 else ("Log" if r < 0.96 else "Stump")))))
 			elif f > 0.35:
 				# forest: mixed pines and birches, fallen logs and stumps
 				kind = "PineTall" if r < 0.28 else ("Pine" if r < 0.55 else ("Birch" if r < 0.8 else ("Log" if r < 0.87 else ("Stump" if r < 0.93 else "Bush"))))
 			else:
 				# meadow: round trees, birches and bushes
 				kind = "RoundTree" if r < 0.35 else ("Birch" if r < 0.55 else ("Bush" if r < 0.95 else "Stump"))
+			if kind == "Bush" and rng.randf() < 0.3 and variants.has("BerryBush"):
+				kind = "BerryBush"
 			s = rng.randf_range(0.75, 1.3)
 		if not variants.has(kind):
 			continue
@@ -192,7 +221,7 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 			b = b * Basis.from_scale(Vector3(wide, s * rng.randf_range(0.85, 1.25), wide))
 		var t := Transform3D(b, d * (R + h) - d * sink)
 		_add(placed, kind, t, rng)
-		if kind in TREES and not kind.ends_with("Bush"):
+		if kind in TREES and not kind.contains("Bush"):
 			colliders.append([t.origin + up * 2.0 * s, 0.35 * s, 4.0 * s])
 		elif kind == "Boulder" or ((kind == "Rock" or kind == "RockSnowy") and s > 1.0):
 			var size_m := (4.5 if kind == "Boulder" else 1.4) * s
@@ -281,6 +310,28 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 					ok = h > -0.5 and h < 0.9 and cold < 0.4 and slope > 0.75
 				"Mushrooms":
 					ok = h > 1.5 and forest > 0.5 and cold < 0.45 and slope > 0.8 and trail < 0.2
+				"Clover":
+					# low carpets in meadows, thinning under trees
+					ok = h > 1.2 and h < snow * 0.5 and cold < 0.38 and slope > 0.85 and trail < 0.3 \
+							and forest < 0.6 and vnoise_patch(u, v, face, 1) > 0.45
+				"Dandelions":
+					ok = h > 1.2 and h < snow * 0.45 and cold < 0.3 and slope > 0.86 and trail < 0.4 \
+							and forest < 0.35 and vnoise_patch(u, v, face, 2) > 0.5
+				"Lupines":
+					# drifts of purple, pink and blue spikes on open hillsides
+					ok = h > 2.0 and h < snow * 0.55 and cold < 0.4 and slope > 0.8 and trail < 0.2 \
+							and forest < 0.3 and vnoise_patch(u, v, face, 3) > 0.62
+				"Heather":
+					# hillsides and cooler highlands
+					ok = h > 4.0 and h < snow * 0.9 and cold < 0.62 and slope > 0.6 and trail < 0.3 and forest < 0.4 \
+							and (h > snow * 0.35 or cold > 0.25 or vnoise_patch(u, v, face, 4) > 0.65)
+				"BerryBush":
+					ok = h > 1.5 and h < snow * 0.5 and cold < 0.4 and slope > 0.82 and trail < 0.2 \
+							and forest > 0.1 and forest < 0.6
+				"Moss":
+					# forest floors, damp shores and cold taiga
+					ok = h > 0.6 and h < snow * 0.8 and cold < 0.55 and slope > 0.65 and trail < 0.2 \
+							and (forest > 0.4 or h < 3.0 or (cold > 0.25 and cold < 0.55))
 				"Pebbles":
 					var shore := h > 0.2 and h < 2.5
 					ok = cold < 0.6 and h > 0.2 and h < shape.snow_line_m(cold) \
@@ -292,6 +343,14 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 			var b := basis_with_up(d).rotated(d, rng.randf() * TAU)
 			b = b * Basis.from_scale(Vector3(sc, sc * rng.randf_range(0.7, 1.5), sc))
 			_add(placed, kind, Transform3D(b, d * (R + h)), rng, int(u * CELLS) * CELLS + int(v * CELLS))
+
+
+## A cheap patchiness value 0..1 for a spot on a piece of ground, so flowers
+## and clover grow in drifts instead of evenly everywhere.
+func vnoise_patch(u: float, v: float, face: int, layer: int) -> float:
+	var x := u * 3.0 + layer * 17.3 + face * 5.1
+	var y := v * 3.0 + layer * 9.7
+	return 0.5 + 0.25 * sin(x * 2.1 + sin(y * 1.7)) + 0.25 * sin(y * 2.3 + sin(x * 1.3 + layer))
 
 
 func _slope(d: Vector3, h: float) -> float:

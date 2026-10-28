@@ -11,6 +11,8 @@ const RES := 32
 
 var shape: PlanetShape
 var material: Material
+## Material for the flowing river water (drawn as a second surface).
+var river_material: Material
 ## The node that gets the most detail (player, ship or camera).
 var focus: Node3D
 ## How many times a cube side can be split. 6 gives about 0.8 m detail on a 1 km planet.
@@ -239,6 +241,9 @@ func _make_piece(n: QuadNode, job: Dictionary) -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, job["arrays"])
 	mesh.surface_set_material(0, material)
+	if job.has("river") and river_material != null:
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, job["river"])
+		mesh.surface_set_material(1, river_material)
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.visible = false
@@ -364,6 +369,9 @@ func _build(job: Dictionary) -> void:
 	arrays[Mesh.ARRAY_COLOR] = colors
 	arrays[Mesh.ARRAY_INDEX] = idx
 	job["arrays"] = arrays
+	var river := _build_river(face, a0, b0, size, n, w, pos, dirs)
+	if not river.is_empty():
+		job["river"] = river
 	if job["collide"]:
 		job["faces"] = faces
 	if job["scatter"]:
@@ -376,3 +384,57 @@ func _build(job: Dictionary) -> void:
 
 func node_width_from_size(size: float) -> float:
 	return size * shape.radius * PI * 0.25
+
+
+## River water: a sheet just above sea level over the river channels, with
+## the flow direction and amount stored per corner for the river shader.
+## Empty if there is no river in this piece.
+func _build_river(face: int, a0: float, b0: float, size: float, n: int, w: int, pos: PackedVector3Array, dirs: PackedVector3Array) -> Array:
+	var R := shape.radius
+	var flows := {}   # grid index -> Vector4
+	var any := false
+	for i in n + 1:
+		for j in n + 1:
+			var k := (i + 1) * w + (j + 1)
+			if pos[k].length() - R > 3.0:
+				continue
+			var f := shape.river_flow(dirs[k])
+			if f.w > 0.0:
+				flows[i * (n + 1) + j] = f
+				any = true
+	if not any:
+		return []
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var normals := PackedVector3Array()
+	var idx := PackedInt32Array()
+	var remap := {}
+	for i in n:
+		for j in n:
+			var corners := [i * (n + 1) + j, (i + 1) * (n + 1) + j, (i + 1) * (n + 1) + j + 1, i * (n + 1) + j + 1]
+			var has := false
+			for c in corners:
+				if flows.has(c):
+					has = true
+			if not has:
+				continue
+			for c in corners:
+				if not remap.has(c):
+					remap[c] = verts.size()
+					var ci: int = c / (n + 1)
+					var cj: int = c % (n + 1)
+					var d := dirs[(ci + 1) * w + (cj + 1)]
+					var f: Vector4 = flows.get(c, Vector4(0, 0, 0, 0))
+					verts.append(d * (R + 0.06))
+					normals.append(d)
+					colors.append(Color(f.x * 0.5 + 0.5, f.y * 0.5 + 0.5, f.z * 0.5 + 0.5, f.w))
+			# same winding as the ground (clockwise is the front side)
+			idx.append_array([remap[corners[0]], remap[corners[2]], remap[corners[1]],
+					remap[corners[0]], remap[corners[3]], remap[corners[2]]])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = idx
+	return arrays

@@ -26,6 +26,14 @@ extends Resource
 @export var hill_height: float = 0.006
 ## 0 = no lakes, 1 = lots of lakes.
 @export_range(0.0, 1.0) var lakes: float = 0.5
+## 0 = no rivers, 1 = rivers in most lowlands.
+@export_range(0.0, 1.0) var rivers: float = 0.6
+## Roughly how far apart rivers are, in metres.
+@export var river_spacing_m: float = 1300.0
+## Half the width of a river, in metres.
+@export var river_width_m: float = 9.0
+## Half the width of a river valley, in metres.
+@export var valley_width_m: float = 170.0
 ## Height of the rocky ledges on mountains, in metres.
 @export var ledge_height_m: float = 14.0
 ## 0 = smooth mountains, 1 = strong ledges.

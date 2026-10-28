@@ -32,6 +32,8 @@ var _trail_main: FastNoiseLite # long winding dirt trails
 var _trail_side: FastNoiseLite # smaller side trails
 var _trail_zone: FastNoiseLite # where side trails are
 var _autumn: FastNoiseLite     # patches where trees have turned gold and red
+var _river: FastNoiseLite      # rivers follow the zero lines of this noise
+var _river_zone: FastNoiseLite # where rivers are
 
 # The six sides of the cube that gets blown up into a ball:
 # outward axis, u axis, v axis (u x v = outward).
@@ -75,6 +77,8 @@ func _init(p_preset: PlanetPreset, p_radius: float, p_seed: int) -> void:
 	_trail_side = _make(s + 18, radius / 150.0, 2, FastNoiseLite.FRACTAL_FBM)
 	_trail_zone = _make(s + 19, 3.0, 2, FastNoiseLite.FRACTAL_FBM)
 	_autumn = _make(s + 23, 4.0, 3, FastNoiseLite.FRACTAL_FBM)
+	_river = _make(s + 24, radius / preset.river_spacing_m, 2, FastNoiseLite.FRACTAL_FBM)
+	_river_zone = _make(s + 25, 2.0, 2, FastNoiseLite.FRACTAL_FBM)
 	_calibrate()
 
 
@@ -193,6 +197,44 @@ func ice(d: Vector3) -> float:
 	return smoothstep(0.62, 0.7, coldness(d))
 
 
+## Rivers: Vector2(distance from the river's middle in metres, strength 0..1).
+## Strength is 0 where there are no rivers (mountains, cold places, dry areas).
+func river_at(d: Vector3, mask: float) -> Vector2:
+	if preset.rivers <= 0.0:
+		return Vector2(INF, 0.0)
+	var zone := smoothstep(0.5 - preset.rivers * 0.5, 0.62 - preset.rivers * 0.5, _river_zone.get_noise_3dv(d) * 0.5 + 0.5)
+	var strength := zone * (1.0 - smoothstep(0.12, 0.4, mask))
+	if strength <= 0.0:
+		return Vector2(INF, 0.0)
+	var n := _river.get_noise_3dv(d)
+	if absf(n) > 0.25:
+		return Vector2(INF, 0.0)
+	# distance to the zero line = value / steepness of the noise
+	var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
+	var t2 := d.cross(t1)
+	var e := 4.0 / radius
+	var g1 := (_river.get_noise_3dv((d + t1 * e).normalized()) - n) / 4.0
+	var g2 := (_river.get_noise_3dv((d + t2 * e).normalized()) - n) / 4.0
+	var grad := sqrt(g1 * g1 + g2 * g2)
+	return Vector2(absf(n) / maxf(grad, 1e-6), strength)
+
+
+## Which way a river flows at a spot, and how much river water is there
+## (0..1). Vector4(direction x, y, z, amount).
+func river_flow(d: Vector3) -> Vector4:
+	var r := river_at(d, raw_height(d).y)
+	if r.y <= 0.0 or r.x > preset.river_width_m * 1.6:
+		return Vector4(0, 0, 0, 0)
+	var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
+	var t2 := d.cross(t1)
+	var e := 4.0 / radius
+	var n := _river.get_noise_3dv(d)
+	var g := t1 * (_river.get_noise_3dv((d + t1 * e).normalized()) - n) + t2 * (_river.get_noise_3dv((d + t2 * e).normalized()) - n)
+	var dir := d.cross(g).normalized()   # along the river
+	var amount := r.y * (1.0 - smoothstep(preset.river_width_m * 0.6, preset.river_width_m * 1.5, r.x))
+	return Vector4(dir.x, dir.y, dir.z, amount)
+
+
 ## 0..1: how autumnal the trees are at a spot (gold larches, red bushes).
 func autumn(d: Vector3) -> float:
 	return smoothstep(0.15, 0.35, _autumn.get_noise_3dv(d))
@@ -292,6 +334,17 @@ func raw_height(d: Vector3) -> Vector3:
 		h = lerpf(h, -3.0, lake_t)
 
 	h += bumps * smoothstep(0.0, 0.05, land_t)
+
+	# River valleys: a wide, gentle valley down to just above sea level, with
+	# the river channel (below sea level, so it fills with water) in the middle.
+	if coldness(d) < 0.55:
+		var riv := river_at(d, mask)
+		if riv.y > 0.0:
+			var valley := 1.0 - smoothstep(preset.river_width_m, preset.valley_width_m, riv.x)
+			var floor_h := 2.6 + riv.x * 0.012
+			h = lerpf(h, minf(h, floor_h), valley * riv.y)
+			var channel := 1.0 - smoothstep(preset.river_width_m * 0.35, preset.river_width_m, riv.x)
+			h = lerpf(h, -2.4, channel * riv.y)
 
 	# Dirt trails on dry land, fading out in the high mountains. The ground
 	# along a trail is worn down a little.
