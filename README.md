@@ -29,6 +29,10 @@ one number (the seed) and you get a different planet.
 | ![Mountains by a lake](previews/mountain.jpg) | ![The whole planet](previews/orbit.jpg) |
 | **Snowy taiga** | **Frozen polar sea** |
 | ![Snowy forest](previews/snow.jpg) | ![Ice shelf near the pole](previews/ice.jpg) |
+| **A river in its valley** | **River valley from above** |
+| ![By the river](previews/river.jpg) | ![A river winding through its valley](previews/valley.jpg) |
+| **Meadow plants** | **Snowy forest** |
+| ![Clover, dandelions, lupines and berry bushes](previews/meadow.jpg) | ![Snowy pines, firs, birches and bushes](previews/snow_forest.jpg) |
 | **Polar cap from orbit** | |
 | ![The pole from orbit](previews/orbit_pole.jpg) | |
 
@@ -229,7 +233,7 @@ SHOTS=vista,ground godot --path godot -- --shots   # only some of the screenshot
 ## Good to know
 
 - Building the ground around the player at the start takes about 15 seconds on
-  a 4-core computer. Show a loading screen until the `loaded` signal fires.
+  a 4-core computer (longer on a slow machine with no graphics card). Show a loading screen until the `loaded` signal fires.
 - Trees and big rocks have collision. Grass, flowers, bushes and logs don't.
 - Water is the same height everywhere (sea level), including lakes. Anything
   below it counts as underwater, which is how swimming knows when to start.

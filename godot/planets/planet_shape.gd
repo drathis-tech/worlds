@@ -222,7 +222,10 @@ func river_at(d: Vector3, mask: float) -> Vector2:
 ## Which way a river flows at a spot, and how much river water is there
 ## (0..1). Vector4(direction x, y, z, amount).
 func river_flow(d: Vector3) -> Vector4:
-	var r := river_at(d, raw_height(d).y)
+	var land := raw_height(d, false)
+	if land.x < 0.0 or coldness(d) >= 0.55:
+		return Vector4(0, 0, 0, 0)   # sea, lakes and frozen lands have no river surface
+	var r := river_at(d, land.y)
 	if r.y <= 0.0 or r.x > preset.river_width_m * 1.6:
 		return Vector4(0, 0, 0, 0)
 	var t1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
@@ -232,6 +235,7 @@ func river_flow(d: Vector3) -> Vector4:
 	var g := t1 * (_river.get_noise_3dv((d + t1 * e).normalized()) - n) + t2 * (_river.get_noise_3dv((d + t2 * e).normalized()) - n)
 	var dir := d.cross(g).normalized()   # along the river
 	var amount := r.y * (1.0 - smoothstep(preset.river_width_m * 0.6, preset.river_width_m * 1.5, r.x))
+	amount *= smoothstep(0.0, 2.0, land.x)   # blends into the lake or sea it runs into
 	return Vector4(dir.x, dir.y, dir.z, amount)
 
 
@@ -260,7 +264,8 @@ func _shelves(d: Vector3, mh: float) -> float:
 
 ## Height in metres above sea level, without landing-site flattening.
 ## Returns Vector3(height, mountain mask, trail amount).
-func raw_height(d: Vector3) -> Vector3:
+## `with_rivers` = false gives the land as it would be without river valleys.
+func raw_height(d: Vector3, with_rivers := true) -> Vector3:
 	var w := _warp_at(d)
 	var c := _continent.get_noise_3dv(d + w * 0.25)
 	var bumps := _bumps.get_noise_3dv(d) * preset.bump_height_m
@@ -337,7 +342,7 @@ func raw_height(d: Vector3) -> Vector3:
 
 	# River valleys: a wide, gentle valley down to just above sea level, with
 	# the river channel (below sea level, so it fills with water) in the middle.
-	if coldness(d) < 0.55:
+	if with_rivers and coldness(d) < 0.55:
 		var riv := river_at(d, mask)
 		if riv.y > 0.0:
 			var valley := 1.0 - smoothstep(preset.river_width_m, preset.valley_width_m, riv.x)

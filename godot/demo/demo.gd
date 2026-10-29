@@ -331,14 +331,16 @@ func _take_shots() -> void:
 		shots.insert(3, ["forest", forest_spot + fu * 1.7, forest_spot + ff * 30.0 + fu * 2.5])
 	# A river winding through its valley: from the bank, and from above.
 	var river_spot := _find_spot(func(d: Vector3) -> bool:
-		return planet.shape.river_flow(d).w > 0.7 and planet.shape.coldness(d) < 0.3)
+		# on the sunny side of the planet, not too far from the landing site
+		return d.dot(planet.to_local(p).normalized()) > 0.8 and planet.shape.river_flow(d).w > 0.7 \
+				and planet.shape.coldness(d) < 0.3 and planet.shape.raw_height(d, false).x > 4.0, 60000)
 	if river_spot != Vector3.ZERO:
 		var ru := planet.up_at(river_spot)
 		var fl := planet.shape.river_flow(planet.to_local(river_spot).normalized())
 		var rf := planet.global_basis * Vector3(fl.x, fl.y, fl.z)
 		rf = (rf - ru * rf.dot(ru)).normalized()
 		var side := ru.cross(rf)
-		shots.append(["river", river_spot - rf * 25.0 + side * 16.0 + ru * 3.0, river_spot + rf * 50.0 + ru * 1.0])
+		shots.append(["river", river_spot - rf * 8.0 + side * 6.0 + ru * 2.5, river_spot + rf * 30.0 - side * 1.0 - ru * 1.0])
 		shots.append(["valley", river_spot - rf * 120.0 + side * 40.0 + ru * 55.0, river_spot + rf * 150.0])
 	# Kneeling in an open meadow, to see the small plants.
 	var meadow := _find_spot(func(d: Vector3) -> bool:
@@ -358,6 +360,24 @@ func _take_shots() -> void:
 		var tgu := planet.up_at(taiga)
 		var tgf := tgu.cross(Vector3.UP if absf(tgu.y) < 0.9 else Vector3.RIGHT).normalized()
 		shots.append(["snow_forest", taiga + tgu * 4.0 - tgf * 10.0, taiga + tgf * 40.0 + tgu * 3.0])
+	# Close up on the nearest rock formation, to see the rock texture.
+	var forms := planet.get_node_or_null("RockFormations")
+	if forms:
+		var best_rock := Vector3.ZERO
+		var best_d := INF
+		for mmi in forms.get_children():
+			var mm: MultiMesh = (mmi as MultiMeshInstance3D).multimesh
+			for i in mm.instance_count:
+				var o := planet.to_global(mm.get_instance_transform(i).origin)
+				var dist := o.distance_to(p)
+				if dist < best_d and dist > 40.0:
+					best_d = dist
+					best_rock = o
+		if best_rock != Vector3.ZERO:
+			var bu := planet.up_at(best_rock)
+			var away := p - best_rock
+			away = (away - bu * away.dot(bu)).normalized()
+			shots.append(["rocks", best_rock + away * 12.0 + bu * 4.0, best_rock + bu * 1.5])
 	# From the top of the highest nearby hill, looking out over the land.
 	var best_top := p
 	var best_dir := toward
@@ -399,9 +419,9 @@ func _take_shots() -> void:
 
 
 ## First evenly-spread spot on the planet where `test(direction)` is true (world position on the ground).
-func _find_spot(test: Callable) -> Vector3:
-	for i in 6000:
-		var d := PlanetShape.fibonacci_dir(i, 6000)
+func _find_spot(test: Callable, count := 6000) -> Vector3:
+	for i in count:
+		var d := PlanetShape.fibonacci_dir(i, count)
 		if test.call(d):
 			return planet.to_global(d * (planet.radius + planet.shape.height(d)))
 	return Vector3.ZERO
