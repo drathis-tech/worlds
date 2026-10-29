@@ -34,6 +34,12 @@ extends Resource
 @export var river_width_m: float = 9.0
 ## Half the width of a river valley, in metres.
 @export var valley_width_m: float = 170.0
+## Rivers run in a rocky gorge: half its width at the top, in metres.
+@export var gorge_width_m: float = 20.0
+## How tall the cliffs on each side of the river can be, in metres.
+@export var cliff_height_m: float = 14.0
+## 0 = calm rivers, 1 = lots of rocky rapids with boulders and white water.
+@export_range(0.0, 1.0) var rapids: float = 0.75
 ## Height of the rocky ledges on mountains, in metres.
 @export var ledge_height_m: float = 14.0
 ## 0 = smooth mountains, 1 = strong ledges.

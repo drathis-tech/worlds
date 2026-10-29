@@ -44,7 +44,7 @@ const SWAYING := ["Grass", "GrassShort", "GrassClump", "TallGrass", "Flowers", "
 # how much each kind moves in the wind (the default is 0.12)
 const SWAY := {"Fern": 0.05, "LeafyBush": 0.05, "TallGrass": 0.06, "GrassClump": 0.06, "Clover": 0.04,
 		"Heather": 0.03, "BerryBush": 0.02, "Lupines": 0.08, "Moss": 0.0}
-const ROCKS := ["Rock", "RockFlat", "Boulder", "RockSnowy", "Pebbles"]
+const ROCKS := ["Rock", "RockFlat", "Boulder", "RockSnowy", "Pebbles", "CliffSlab", "CliffBlock", "CliffPillar", "CliffRound", "CliffWedge"]
 const CELLS := 3            # small things: CELLS x CELLS groups per piece
 const LATTICE_M := 2.0      # spacing of the height grid used for small things
 const TREES := ["Pine", "PineTall", "PineSnowy", "Fir", "FirSnowy", "Birch", "RoundTree", "Bush", "DeadTree",
@@ -228,6 +228,7 @@ func make_data(face: int, a0: float, b0: float, size: float) -> Dictionary:
 			colliders.append([t.origin + up * size_m * 0.2, size_m * 0.42, 0.0])
 
 	_place_small(face, a0, b0, size, width, rng, placed)
+	_place_river_rocks(face, a0, b0, size, width, rng, placed, colliders)
 
 	return {"placed": placed, "colliders": colliders, "width": width}
 
@@ -307,7 +308,7 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 							and slope > 0.8 and trail < 0.3
 				"Reeds":
 					# right at the water's edge, some standing in the shallows
-					ok = h > -0.5 and h < 0.9 and cold < 0.4 and slope > 0.75
+					ok = h > -0.5 and h < 0.75 and cold < 0.4 and slope > 0.75 and rng.randf() < 0.7
 				"Mushrooms":
 					ok = h > 1.5 and forest > 0.5 and cold < 0.45 and slope > 0.8 and trail < 0.2
 				"Clover":
@@ -343,6 +344,64 @@ func _place_small(face: int, a0: float, b0: float, size: float, width: float, rn
 			var b := basis_with_up(d).rotated(d, rng.randf() * TAU)
 			b = b * Basis.from_scale(Vector3(sc, sc * rng.randf_range(0.7, 1.5), sc))
 			_add(placed, kind, Transform3D(b, d * (R + h)), rng, int(u * CELLS) * CELLS + int(v * CELLS))
+
+
+## Boulders in the river (thickest in the rapids, poking out of the water so
+## you can hop across) and fallen rocks on the stony ledges under the cliffs.
+func _place_river_rocks(face: int, a0: float, b0: float, size: float, width: float, rng: RandomNumberGenerator, placed: Dictionary, colliders: Array) -> void:
+	if preset.rivers <= 0.0:
+		return
+	var R := shape.radius
+	var g := clampi(int(width / 12.0), 2, 14)   # check the piece in g x g cells
+	var cell := size / g
+	var cell_m := width / g
+	for ci in g:
+		for cj in g:
+			var dc := PlanetShape.cube_dir(face, a0 + cell * (ci + 0.5), b0 + cell * (cj + 0.5))
+			var near := shape.river_near(dc)
+			if near.x > preset.gorge_width_m + cell_m:
+				continue
+			for _k in int(cell_m * cell_m / 18.0):
+				var d := PlanetShape.cube_dir(face, a0 + cell * (ci + rng.randf()), b0 + cell * (cj + rng.randf()))
+				var rv := shape.river_near(d)
+				if rv.y <= 0.1:
+					continue
+				var x := rv.x
+				var kind := ""
+				var s := 1.0
+				var sink := 0.3
+				if x < preset.river_width_m:
+					# in the water: mostly in the rapids
+					if rng.randf() > 0.15 + rv.z * 0.5:
+						continue
+					var r := rng.randf()
+					kind = "Boulder" if r < 0.35 else ("Rock" if r < 0.7 else "CliffRound")
+					s = rng.randf_range(0.55, 0.9) if kind == "Boulder" else rng.randf_range(1.4, 2.6)
+					if kind == "CliffRound":
+						s = rng.randf_range(0.35, 0.6)
+				elif x < preset.gorge_width_m - 2.0:
+					# the stony ledge under the cliffs
+					if rng.randf() > 0.35:
+						continue
+					var r := rng.randf()
+					kind = "Rock" if r < 0.3 else ("RockFlat" if r < 0.5 else ("Pebbles" if r < 0.7 \
+							else ("Boulder" if r < 0.8 else ("CliffRound" if r < 0.9 else "CliffBlock"))))
+					s = rng.randf_range(0.3, 0.6) if kind == "Boulder" else rng.randf_range(0.6, 1.6)
+					if kind.begins_with("Cliff"):
+						s = rng.randf_range(0.25, 0.5)
+				else:
+					continue
+				if not variants.has(kind):
+					continue
+				var h := shape.height(d)
+				var b := basis_with_up(d).rotated(d, rng.randf() * TAU)
+				b = b.rotated(b.x.rotated(d, rng.randf() * TAU), rng.randf_range(-0.4, 0.4))
+				b = b * Basis.from_scale(Vector3(s * rng.randf_range(0.8, 1.25), s * rng.randf_range(0.7, 1.1), s * rng.randf_range(0.8, 1.25)))
+				var t := Transform3D(b, d * (R + h - sink * s))
+				_add(placed, kind, t, rng)
+				if kind == "Boulder" or (kind != "Pebbles" and s > 1.2):
+					var size_m := (4.5 if kind == "Boulder" else 1.4) * s
+					colliders.append([t.origin + d * size_m * 0.2, size_m * 0.42, 0.0])
 
 
 ## A cheap patchiness value 0..1 for a spot on a piece of ground, so flowers

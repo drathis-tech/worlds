@@ -72,11 +72,11 @@ vec3 rock_texture(vec3 col, vec3 p, vec3 n, vec3 seed) {
 	float band = vnoise(vec3(p.x * 0.3, p.y * 2.2, p.z * 0.3));
 	col = mix(col, col * vec3(1.08, 0.98, 0.9), smoothstep(0.55, 0.75, band) * 0.6);
 	// speckles: tiny light and dark grains
-	float g = hash3(floor(p * 16.0));
-	col *= 1.0 + (step(0.93, g) * 0.14 - step(g, 0.06) * 0.16) * (1.0 - snow);
+	float g = vnoise(p * 13.0);
+	col *= 1.0 + (smoothstep(0.7, 0.78, g) * 0.12 - smoothstep(0.3, 0.22, g) * 0.14) * (1.0 - snow);
 	// cracks: thin dark lines winding over the surface
 	float c = abs(vnoise(p * vec3(0.9, 1.6, 0.9) + 11.0) - 0.5);
-	float crack = 1.0 - smoothstep(0.012, 0.035, c);
+	float crack = 1.0 - smoothstep(0.006, 0.02, c);
 	crack *= smoothstep(0.4, 0.6, vnoise(p * 0.35 + 5.0));   // not everywhere
 	col *= 1.0 - crack * 0.45;
 	// lichen: crusty yellow and orange spots, mostly on the sides and top

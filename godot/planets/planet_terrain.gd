@@ -303,10 +303,13 @@ func _build(job: Dictionary) -> void:
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()   # x = stony river gorge floor
 	var count := (n + 1) * (n + 1)
 	verts.resize(count)
 	normals.resize(count)
 	colors.resize(count)
+	uvs.resize(count)
+	var gorge_w := shape.preset.gorge_width_m
 	for i in n + 1:
 		for j in n + 1:
 			var k := (i + 1) * w + (j + 1)
@@ -320,6 +323,11 @@ func _build(job: Dictionary) -> void:
 			var cold := shape.coldness(d)
 			var frozen := shape.ice(d) if cold > 0.6 else 0.0
 			colors[v] = Color(shape.forest(d), cold, frozen, trails[k])
+			# low ground in a river gorge is stony, not sandy
+			if cold < 0.55 and absf(pos[k].length() - R) < 4.0:
+				var near := shape.river_near(d)
+				if near.y > 0.0:
+					uvs[v] = Vector2((1.0 - smoothstep(gorge_w - 3.0, gorge_w + 1.0, near.x)) * minf(1.0, near.y * 2.0), 0.0)
 
 	var idx := PackedInt32Array()
 	for i in n:
@@ -354,6 +362,7 @@ func _build(job: Dictionary) -> void:
 			verts.append(verts[vi] - verts[vi].normalized() * skirt)
 			normals.append(normals[vi])
 			colors.append(colors[vi])
+			uvs.append(uvs[vi])
 		for e in edge.size() - 1:
 			var a: int = edge[e]
 			var b: int = edge[e + 1]
@@ -367,6 +376,7 @@ func _build(job: Dictionary) -> void:
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = idx
 	job["arrays"] = arrays
 	var river := _build_river(face, a0, b0, size, n, w, pos, dirs)
@@ -407,6 +417,7 @@ func _build_river(face: int, a0: float, b0: float, size: float, n: int, w: int, 
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()   # x = rapids (rocky white water)
 	var idx := PackedInt32Array()
 	var remap := {}
 	for i in n:
@@ -428,6 +439,7 @@ func _build_river(face: int, a0: float, b0: float, size: float, n: int, w: int, 
 					verts.append(d * (R + 0.06))
 					normals.append(d)
 					colors.append(Color(f.x * 0.5 + 0.5, f.y * 0.5 + 0.5, f.z * 0.5 + 0.5, f.w))
+					uvs.append(Vector2(shape.river_rapids(d) if f.w > 0.0 else 0.0, 0.0))
 			# same winding as the ground (clockwise is the front side)
 			idx.append_array([remap[corners[0]], remap[corners[2]], remap[corners[1]],
 					remap[corners[0]], remap[corners[3]], remap[corners[2]]])
@@ -436,5 +448,6 @@ func _build_river(face: int, a0: float, b0: float, size: float, n: int, w: int, 
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = idx
 	return arrays

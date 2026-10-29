@@ -7,7 +7,8 @@ about 48 minutes at walking pace. Ships
 can land, and players can walk, run, swim and climb. There are forests,
 meadows full of swaying grass, clover, dandelions, lupines and berry bushes,
 golden grass patches, heather on the hills, autumn larches and red bushes,
-dirt trails winding all over, river valleys with flowing water, lakes with
+dirt trails winding all over, rivers flowing through rocky gorges with
+cliffs on both sides and boulders in the rapids, lakes with
 reeds and foamy shores, gentle mountains with sandstone rock formations, snowy biomes
 and frozen polar seas, all in warm golden-hour light with coloured haze in
 the distance. You can
@@ -29,8 +30,10 @@ one number (the seed) and you get a different planet.
 | ![Mountains by a lake](previews/mountain.jpg) | ![The whole planet](previews/orbit.jpg) |
 | **Snowy taiga** | **Frozen polar sea** |
 | ![Snowy forest](previews/snow.jpg) | ![Ice shelf near the pole](previews/ice.jpg) |
-| **A river in its valley** | **River valley from above** |
-| ![By the river](previews/river.jpg) | ![A river winding through its valley](previews/valley.jpg) |
+| **Down in a river gorge** | **Cliffs above the river** |
+| ![By the river, between the cliffs](previews/river.jpg) | ![Looking down into a river gorge](previews/gorge.jpg) |
+| **River valley from above** | |
+| ![A river winding through its gorge](previews/valley.jpg) | |
 | **Meadow plants** | **Snowy forest** |
 | ![Clover, dandelions, lupines and berry bushes](previews/meadow.jpg) | ![Snowy pines, firs, birches and bushes](previews/snow_forest.jpg) |
 | **Polar cap from orbit** | |
@@ -142,8 +145,12 @@ Godot to change:
 - lakes and the snow line
 - **Rivers**: how many there are, how far apart (**River Spacing M**), how wide
   the water is (**River Width M**) and how wide their valleys are
-  (**Valley Width M**). Rivers wind through the flat lowlands; the water
-  flows and carries streaks of foam downstream.
+  (**Valley Width M**). Rivers wind through the flat lowlands in a rocky
+  gorge: **Gorge Width M** and **Cliff Height M** set its size, and
+  **Rapids** how much of the river is white water with boulders sticking
+  out (you can hop across on them). The water flows and carries streaks of
+  foam downstream; the gorge floor is stony, with fallen rocks under the
+  cliffs.
 - the size of the snowy polar caps (**Polar Cap**) and how many snowy areas
   there are away from the poles (**Snowy Biomes**)
 - every colour, tree and rock density, and the number of clouds

@@ -239,6 +239,26 @@ func river_flow(d: Vector3) -> Vector4:
 	return Vector4(dir.x, dir.y, dir.z, amount)
 
 
+## Near a river? Vector3(distance from its middle in metres, strength 0..1,
+## rapids 0..1). Distance is INF away from rivers.
+func river_near(d: Vector3) -> Vector3:
+	var land := raw_height(d, false)
+	if land.x < 0.0 or coldness(d) >= 0.55:
+		return Vector3(INF, 0.0, 0.0)
+	var r := river_at(d, land.y)
+	if r.y <= 0.0:
+		return Vector3(INF, 0.0, 0.0)
+	return Vector3(r.x, r.y * smoothstep(0.0, 2.0, land.x), river_rapids(d))
+
+
+## 0..1: how rocky and white the river water is at a spot (rapids).
+func river_rapids(d: Vector3) -> float:
+	if preset.rapids <= 0.0:
+		return 0.0
+	var start := 0.75 - preset.rapids * 0.35
+	return smoothstep(start, start + 0.18, _style.get_noise_3dv(d * 9.0 + Vector3(2.0, 7.0, 1.0)) * 0.5 + 0.5)
+
+
 ## 0..1: how autumnal the trees are at a spot (gold larches, red bushes).
 func autumn(d: Vector3) -> float:
 	return smoothstep(0.15, 0.35, _autumn.get_noise_3dv(d))
@@ -342,13 +362,29 @@ func raw_height(d: Vector3, with_rivers := true) -> Vector3:
 
 	# River valleys: a wide, gentle valley down to just above sea level, with
 	# the river channel (below sea level, so it fills with water) in the middle.
+	# River valleys: a wide, gentle valley, then a rocky gorge with cliffs on
+	# both sides, a narrow stony ledge at the bottom, and the river channel
+	# (below sea level, so it fills with water) in the middle.
 	if with_rivers and coldness(d) < 0.55:
 		var riv := river_at(d, mask)
 		if riv.y > 0.0:
-			var valley := 1.0 - smoothstep(preset.river_width_m, preset.valley_width_m, riv.x)
-			var floor_h := 2.6 + riv.x * 0.012
+			var x := riv.x
+			# the valley floor: no lower than the cliff height where the land
+			# is high enough, so the gorge always has proper cliffs
+			var valley := 1.0 - smoothstep(preset.gorge_width_m, preset.valley_width_m, x)
+			var floor_h := maxf(minf(h, preset.cliff_height_m), h * 0.55) + (x - preset.gorge_width_m) * 0.02
 			h = lerpf(h, minf(h, floor_h), valley * riv.y)
-			var channel := 1.0 - smoothstep(preset.river_width_m * 0.35, preset.river_width_m, riv.x)
+			# the cliff edge wanders in and out, and the walls are stepped
+			var wobble := _crags.get_noise_3dv(d * 3.0) * 5.0
+			var edge := preset.gorge_width_m + wobble
+			var wall := 1.0 - smoothstep(edge - 5.0, edge, x)
+			if wall > 0.0:
+				var ledge_h := 1.3 + _crags.get_noise_3dv(d * 9.0) * 0.4
+				var t := smoothstep(edge - 5.0, edge, x)   # 0 at the cliff foot, 1 at the top
+				var steps := floorf(t * 3.0) / 3.0 + smoothstep(0.55, 1.0, fmod(t * 3.0, 1.0)) / 3.0
+				var cliff := lerpf(ledge_h, h, lerpf(t, steps, 0.6))
+				h = lerpf(h, minf(h, cliff), riv.y)
+			var channel := 1.0 - smoothstep(preset.river_width_m * 0.45, preset.river_width_m, x)
 			h = lerpf(h, -2.4, channel * riv.y)
 
 	# Dirt trails on dry land, fading out in the high mountains. The ground

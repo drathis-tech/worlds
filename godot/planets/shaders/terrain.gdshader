@@ -28,6 +28,7 @@ varying float v_forest;
 varying float v_cold;   // 0 warm .. 1 frozen (poles and snowy biomes)
 varying float v_ice;    // frozen sea
 varying float v_trail;  // dirt trail
+varying float v_gorge;  // stony floor of a river gorge
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -64,6 +65,7 @@ void vertex() {
 	v_cold = COLOR.g;
 	v_ice = COLOR.b;
 	v_trail = COLOR.a;
+	v_gorge = UV.x;
 }
 
 void fragment() {
@@ -129,6 +131,16 @@ void fragment() {
 	// Sand on the shore.
 	float sand_t = 1.0 - smoothstep(0.6, 2.2 + mid * 1.5, h);
 	col = mix(col, sand.rgb * (0.95 + fine * 0.1), sand_t);
+
+	// River gorges: a stony floor of grey-pink stones and gravel instead of sand.
+	if (v_gorge > 0.01) {
+		float stones = fbm(flat_pos * 1.1 + vec3(3.0));
+		float gravel = fbm(flat_pos * 4.0);
+		vec3 stony = mix(rock * 0.62, rock * 1.05, smoothstep(0.42, 0.58, stones));
+		stony *= 0.9 + 0.2 * gravel;
+		stony = mix(stony, grass * 0.8, smoothstep(0.66, 0.76, fbm(flat_pos * 0.35 + vec3(8.0))) * 0.7);   // tufts of grass
+		col = mix(col, stony, v_gorge * (1.0 - smoothstep(2.5, 5.0, h)));
+	}
 
 	// Rock on steep ground and high up.
 	float rock_t = 1.0 - smoothstep(rock_slope - 0.05, rock_slope + 0.05, slope + (mid - 0.5) * 0.15);
